@@ -2216,9 +2216,9 @@ class DashboardGenerator:
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
 
-            # B27~D27에 헤더 추가
-            headers = ['예산과목', '집행률(%)', '예산금액']
-            header_cells = ['B27', 'C27', 'D27']
+            # B27~E27에 헤더 추가
+            headers = ['예산과목', '집행률(%)', '예산금액', '예산잔액']
+            header_cells = ['B27', 'C27', 'D27', 'E27']
 
             for header, cell_ref in zip(headers, header_cells):
                 cell = worksheet[cell_ref]
@@ -2235,6 +2235,7 @@ class DashboardGenerator:
                     row['예산목'] != '총액' and not pd.isna(row['예산과목'])):
                     budget_items_data.append({
                         '예산과목': row['예산과목'],
+                        '예산금액': row['예산금액'],
                         '예산잔액': row['예산잔액'],
                         '집행률': row['집행률']
                     })
@@ -2263,8 +2264,19 @@ class DashboardGenerator:
                 execution_cell.alignment = Alignment(horizontal='right', vertical='center')
                 execution_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
 
-                # 예산잔액 (D열) - 총액 시트 참조
-                remaining_cell = worksheet[f'D{row_num}']
+                # 예산금액 (D열) - 총액 시트 참조
+                budget_amount_cell = worksheet[f'D{row_num}']
+                if original_row:
+                    budget_amount_cell.value = f'=총액!D{original_row}'  # 총액 시트의 D열(예산금액) 참조
+                else:
+                    budget_amount_cell.value = item['예산금액']
+                budget_amount_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                budget_amount_cell.alignment = Alignment(horizontal='right', vertical='center')
+                budget_amount_cell.number_format = '#,##0'
+                budget_amount_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+
+                # 예산잔액 (E열) - 총액 시트 참조
+                remaining_cell = worksheet[f'E{row_num}']
                 if original_row:
                     remaining_cell.value = f'=총액!G{original_row}'  # 총액 시트의 G열(예산잔액) 참조
                 else:
@@ -2277,10 +2289,11 @@ class DashboardGenerator:
             # 컬럼 너비 조정 (대시보드에 맞게)
             worksheet.column_dimensions['B'].width = 25  # 예산과목
             worksheet.column_dimensions['C'].width = 12  # 집행률
-            # worksheet.column_dimensions['D'].width = 15  # 예산금액
+            worksheet.column_dimensions['D'].width = 15  # 예산금액
+            worksheet.column_dimensions['E'].width = 15  # 예산잔액
 
-            # 예산과목별 지표 그래프 추가 (테이블 옆에)
-            self._create_budget_item_charts(worksheet, len(budget_items_data))
+            # 예산과목별 지표 그래프 추가 (테이블 옆에) - 제거됨
+            # self._create_budget_item_charts(worksheet, len(budget_items_data))
 
             logging.info(f"대시보드 예산과목별 지표 섹션 생성 완료: {len(budget_items_data)}개 항목")
 
