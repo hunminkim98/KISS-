@@ -294,6 +294,22 @@ class ExcelExporter:
                 self._reorder_sheets_with_dashboard_first(writer.book)
 
             logging.info(f"Excel 파일 출력 완료: {output_path}")
+            
+            # 7. xlwings를 사용한 대화형 피벗 테이블 추가
+            from config import ENABLE_INTERACTIVE_PIVOT
+            if ENABLE_INTERACTIVE_PIVOT:
+                pivot_generator = InteractivePivotGenerator()
+                if pivot_generator.xlwings_available:
+                    success = pivot_generator.add_interactive_features(output_path)
+                    if success:
+                        logging.info("대화형 피벗 테이블 추가 완료")
+                    else:
+                        logging.warning("대화형 피벗 테이블 추가 실패")
+                else:
+                    logging.info("xlwings 사용 불가 - 정적 시트만 생성됨")
+            else:
+                logging.info("대화형 피벗 테이블 기능이 비활성화됨")
+                
             return True
 
         except Exception as e:
@@ -1334,7 +1350,7 @@ class SummarySheetGenerator:
                 return pd.DataFrame(columns=SUMMARY_SHEET_COLUMNS)
 
             result_data = hierarchical_data.copy()
-            default_budgets = self.budget_classification['default_budget_amounts']
+            default_budgets = self.budget_classification['2025_budget_amounts']
 
             # 예산금액 설정
             result_data['예산금액'] = result_data['예산과목'].apply(
@@ -2983,7 +2999,7 @@ class TotalSheetGenerator:
                 return pd.DataFrame(columns=TOTAL_SHEET_COLUMNS)
 
             result_data = hierarchical_data.copy()
-            default_budgets = self.budget_classification['default_budget_amounts']
+            default_budgets = self.budget_classification['2025_budget_amounts']
 
             # 예산금액 설정
             result_data['예산금액'] = result_data['예산과목'].apply(
@@ -3049,3 +3065,212 @@ class TotalSheetGenerator:
         except Exception as e:
             logging.error(f"총액 행 추가 중 오류: {str(e)}")
             return final_data
+
+
+class InteractivePivotGenerator:
+    '''xlwings를 사용한 대화형 피벗 테이블 생성 클래스'''
+
+    def __init__(self):
+        self.xlwings_available = self._check_xlwings_availability()
+
+    def _check_xlwings_availability(self) -> bool:
+        '''xlwings 사용 가능성 검사'''
+        try:
+            import xlwings as xw
+            # Excel 애플리케이션 연결 테스트
+            with xw.App(visible=False, add_book=False) as app:
+                pass
+            logging.info("xlwings 사용 가능 확인")
+            return True
+        except Exception as e:
+            logging.warning(f"xlwings 사용 불가: {str(e)}")
+            return False
+
+    def add_interactive_features(self, file_path: str) -> bool:
+        '''기존 Excel 파일에 대화형 피벗 테이블과 슬라이서 추가'''
+        if not self.xlwings_available:
+            logging.info("xlwings를 사용할 수 없어 대화형 기능을 건너뜁니다.")
+            return False
+
+        try:
+            import xlwings as xw
+            from config import PIVOT_CONFIG, PIVOT_SHEET_NAME, PIVOT_CHART_TITLE
+
+            logging.info(f"대화형 피벗 테이블 생성 시작: {file_path}")
+
+            with xw.App(visible=True) as app:
+                wb = app.books.open(file_path)
+                
+                # 총액 시트가 존재하는지 확인
+                if '총액' not in [sheet.name for sheet in wb.sheets]:
+                    logging.error("총액 시트를 찾을 수 없습니다.")
+                    return False
+
+                # 피벗 테이블 시트 생성
+                ws_pivot = wb.sheets.add(PIVOT_SHEET_NAME)
+                
+                # 피벗 테이블 생성
+                pivot_table = self._create_pivot_table(wb, '총액', ws_pivot)
+                if not pivot_table:
+                    logging.error("피벗 테이블 생성 실패")
+                    return False
+
+                # 피벗 차트 추가
+                self._add_pivot_chart(ws_pivot, pivot_table)
+
+                # 슬라이서 추가
+                self._add_slicers(wb, pivot_table, ws_pivot)
+
+                # 파일 저장
+                wb.save()
+                logging.info("대화형 피벗 테이블 생성 완료")
+
+            return True
+
+        except Exception as e:
+            logging.error(f"대화형 피벗 테이블 생성 중 오류: {str(e)}")
+            return False
+
+    def _create_pivot_table(self, wb, source_sheet_name: str, ws_pivot) -> object:
+        '''피벗 테이블 생성'''
+        try:
+            import xlwings as xw
+            from config import PIVOT_CONFIG
+
+            # 소스 데이터 범위 설정
+            ws_source = wb.sheets[source_sheet_name]
+            source_range = ws_source.range('A1').expand()
+
+            logging.info(f"소스 데이터 범위: {source_range.address}")
+
+            # 1. 피벗 캐시 생성
+            pivot_cache = wb.api.PivotCaches().Create(
+                SourceType=xw.constants.PivotTableSourceType.xlDatabase,
+                SourceData=source_range.api
+            )
+
+            # 2. 피벗 테이블 생성
+            pivot_table = pivot_cache.CreatePivotTable(
+                TableDestination=ws_pivot.range('A3').api,
+                TableName='BudgetAnalysisPivot'
+            )
+
+            # 3. 필드 배치
+            # 행 필드: 예산과목
+            pivot_table.PivotFields('예산과목').Orientation = xw.constants.PivotFieldOrientation.xlRowField
+
+            # 값 필드들을 각각 추가 (열로 표시됨)
+            data_field1 = pivot_table.AddDataField(
+                pivot_table.PivotFields('예산금액'),
+                '예산금액',
+                xw.constants.ConsolidationFunction.xlSum
+            )
+            data_field1.NumberFormat = '#,##0'
+
+            data_field2 = pivot_table.AddDataField(
+                pivot_table.PivotFields('예산잔액'),
+                '예산잔액',
+                xw.constants.ConsolidationFunction.xlSum
+            )
+            data_field2.NumberFormat = '#,##0'
+
+            data_field3 = pivot_table.AddDataField(
+                pivot_table.PivotFields('집행률'),
+                '집행률',
+                xw.constants.ConsolidationFunction.xlAverage
+            )
+            data_field3.NumberFormat = '0.0%'
+
+            logging.info("피벗 테이블 필드 구성 완료")
+            return pivot_table
+
+        except Exception as e:
+            logging.error(f"피벗 테이블 생성 중 오류: {str(e)}")
+            return None
+
+    def _add_pivot_chart(self, ws_pivot, pivot_table):
+        '''피벗 차트 추가'''
+        try:
+            import xlwings as xw
+            from config import PIVOT_CONFIG, PIVOT_CHART_TITLE
+
+            # 차트 위치 설정
+            chart_pos = PIVOT_CONFIG['chart_position']
+
+            # 피벗 차트 생성 (세로 막대형)
+            chart_shape = ws_pivot.api.Shapes.AddChart2(
+                227,  # 차트 스타일
+                xw.constants.ChartType.xlColumnClustered
+            )
+            
+            chart = chart_shape.Chart
+            chart.SetSourceData(Source=ws_pivot.range('A3').expand().api)
+            chart.HasTitle = True
+            chart.ChartTitle.Text = PIVOT_CHART_TITLE
+
+            # 차트 위치 조정
+            chart_shape.Left = chart_pos['left']
+            chart_shape.Top = chart_pos['top']
+            chart_shape.Width = chart_pos['width']
+            chart_shape.Height = chart_pos['height']
+
+            logging.info("피벗 차트 추가 완료")
+
+        except Exception as e:
+            logging.error(f"피벗 차트 추가 중 오류: {str(e)}")
+
+    def _add_slicers(self, wb, pivot_table, ws_pivot):
+        '''슬라이서 추가'''
+        try:
+            import xlwings as xw
+            from config import PIVOT_CONFIG
+
+            slicer_positions = PIVOT_CONFIG['slicer_positions']
+
+            # 1. 예산과목 슬라이서
+            try:
+                slicer_cache_budget = wb.api.SlicerCaches.Add2(
+                    pivot_table,
+                    '예산과목'
+                )
+                
+                budget_pos = slicer_positions['budget_item']
+                slicer_cache_budget.Slicers.Add(
+                    SlicerDestination=ws_pivot.api,
+                    Name='BudgetItemSlicer',
+                    Caption='예산과목 선택',
+                    Top=budget_pos['top'],
+                    Left=budget_pos['left'],
+                    Width=budget_pos['width'],
+                    Height=budget_pos['height']
+                )
+                logging.info("예산과목 슬라이서 추가 완료")
+                
+            except Exception as e:
+                logging.warning(f"예산과목 슬라이서 추가 실패: {str(e)}")
+
+            # 2. 측정항목 슬라이서 (Values 필드용)
+            try:
+                # Values 필드에 대한 슬라이서 생성 시도
+                slicer_cache_values = wb.api.SlicerCaches.Add2(
+                    pivot_table,
+                    '값'  # Values 필드의 한국어명
+                )
+                
+                metric_pos = slicer_positions['metric']
+                slicer_cache_values.Slicers.Add(
+                    SlicerDestination=ws_pivot.api,
+                    Name='MetricSlicer',
+                    Caption='측정항목 선택',
+                    Top=metric_pos['top'],
+                    Left=metric_pos['left'],
+                    Width=metric_pos['width'],
+                    Height=metric_pos['height']
+                )
+                logging.info("측정항목 슬라이서 추가 완료")
+                
+            except Exception as e:
+                logging.warning(f"측정항목 슬라이서 추가 실패: {str(e)}")
+
+        except Exception as e:
+            logging.error(f"슬라이서 추가 중 오류: {str(e)}")
