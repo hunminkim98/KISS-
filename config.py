@@ -282,8 +282,8 @@ PIVOT_CHART_TITLE = '예산 분석 차트'
 # 피벗 테이블 구조 설정
 PIVOT_CONFIG = {
     'row_fields': ['예산과목'],                          # 행: 예산과목
-    'data_fields': ['예산금액', '예산잔액', '집행률'],      # 열로 표시될 값들
-    'slicer_fields': ['예산과목', '측정항목'],            # 두 개의 슬라이서
+    'data_fields': ['예산금액', '예산잔액', '집행률'],      # 원본 값들을 그대로 표시
+    'slicer_fields': ['예산과목'],  # 예산과목 슬라이서만 추가 (값 필드 슬라이서는 별도 처리)
     'chart_position': {
         'top': 50,
         'left': 600,

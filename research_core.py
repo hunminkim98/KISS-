@@ -3131,15 +3131,138 @@ class InteractivePivotGenerator:
             logging.error(f"대화형 피벗 테이블 생성 중 오류: {str(e)}")
             return False
 
+    def _create_pivot_data_sheet(self, wb, source_sheet_name: str) -> str:
+        '''피벗 테이블용 세로형 데이터 시트 생성'''
+        try:
+            import xlwings as xw
+            
+            logging.info("피벗용 세로형 데이터 시트 생성 시작")
+            
+            # 원본 데이터 읽기
+            ws_source = wb.sheets[source_sheet_name]
+            source_range = ws_source.used_range
+            
+            logging.info(f"원본 데이터 범위: {source_range.address}, 행 수: {source_range.shape[0]}")
+            
+            # 새 시트 생성
+            pivot_data_sheet_name = '피벗데이터'
+            try:
+                # 기존 시트가 있으면 삭제
+                wb.sheets[pivot_data_sheet_name].delete()
+                logging.info("기존 피벗데이터 시트 삭제")
+            except:
+                pass
+            
+            ws_pivot_data = wb.sheets.add(pivot_data_sheet_name)
+            logging.info(f"새 피벗데이터 시트 생성: {pivot_data_sheet_name}")
+            
+            # 헤더 설정
+            ws_pivot_data.range('A1').value = '예산과목'
+            ws_pivot_data.range('B1').value = '특성'
+            ws_pivot_data.range('C1').value = '값'
+            
+            # 데이터 변환
+            row_idx = 2  # 데이터 시작 행
+            
+            for data_row in range(2, source_range.shape[0] + 1):  # 헤더 제외
+                budget_category = ws_source.range(f'C{data_row}').value  # 예산과목
+                budget_amount = ws_source.range(f'D{data_row}').value    # 예산금액
+                center_amount = ws_source.range(f'E{data_row}').value    # 센터
+                research_amount = ws_source.range(f'F{data_row}').value  # 심층연구
+                remaining_amount = ws_source.range(f'G{data_row}').value # 예산잔액
+                execution_rate = ws_source.range(f'H{data_row}').value   # 집행률
+                
+                # 디버깅용 로그 추가
+                if data_row <= 5:  # 처음 몇 행만 로깅
+                    logging.debug(f"행 {data_row}: 예산과목={budget_category}, 예산금액={budget_amount}")
+                
+                # 예산과목이 비어있으면 건너뛰기
+                if not budget_category or str(budget_category).strip() == '':
+                    continue
+                
+                # None 값 처리 및 타입 변환
+                try:
+                    budget_amount = float(budget_amount) if budget_amount is not None else 0
+                    center_amount = float(center_amount) if center_amount is not None else 0
+                    research_amount = float(research_amount) if research_amount is not None else 0
+                    remaining_amount = float(remaining_amount) if remaining_amount is not None else 0
+                    execution_rate = float(execution_rate) if execution_rate is not None else 0
+                except (ValueError, TypeError) as e:
+                    logging.warning(f"행 {data_row} 숫자 형변환 실패: {e}, 0으로 설정")
+                    budget_amount = center_amount = research_amount = remaining_amount = execution_rate = 0
+                
+                # 지출액 계산
+                total_expense = center_amount + research_amount
+                
+                if budget_category:  # 예산과목이 있는 경우만
+                    # 예산금액 행
+                    ws_pivot_data.range(f'A{row_idx}').value = budget_category
+                    ws_pivot_data.range(f'B{row_idx}').value = '예산금액'
+                    ws_pivot_data.range(f'C{row_idx}').value = budget_amount
+                    row_idx += 1
+                    
+                    # 지출액 행
+                    ws_pivot_data.range(f'A{row_idx}').value = budget_category
+                    ws_pivot_data.range(f'B{row_idx}').value = '지출액'
+                    ws_pivot_data.range(f'C{row_idx}').value = total_expense
+                    row_idx += 1
+                    
+                    # 예산잔액 행
+                    ws_pivot_data.range(f'A{row_idx}').value = budget_category
+                    ws_pivot_data.range(f'B{row_idx}').value = '예산잔액'
+                    ws_pivot_data.range(f'C{row_idx}').value = remaining_amount
+                    row_idx += 1
+                    
+                    # 집행률 행
+                    ws_pivot_data.range(f'A{row_idx}').value = budget_category
+                    ws_pivot_data.range(f'B{row_idx}').value = '집행률(%)'
+                    ws_pivot_data.range(f'C{row_idx}').value = execution_rate
+                    row_idx += 1
+            
+            logging.info(f"피벗용 세로형 데이터 생성 완료: {row_idx-1}개 행")
+            
+            # 즉시 저장하여 데이터 확정
+            try:
+                wb.save()
+                logging.info("피벗 데이터 시트 저장 완료")
+            except Exception as save_error:
+                logging.warning(f"피벗 데이터 시트 저장 실패: {save_error}")
+            
+            return pivot_data_sheet_name
+            
+        except Exception as e:
+            logging.error(f"피벗용 데이터 시트 생성 중 오류: {str(e)}")
+            return None
+
     def _create_pivot_table(self, wb, source_sheet_name: str, ws_pivot) -> object:
         '''피벗 테이블 생성'''
         try:
             import xlwings as xw
             from config import PIVOT_CONFIG
 
-            # 소스 데이터 범위 설정
-            ws_source = wb.sheets[source_sheet_name]
-            source_range = ws_source.range('A1').expand()
+            # 먼저 세로형 데이터 시트 생성
+            pivot_data_sheet_name = self._create_pivot_data_sheet(wb, source_sheet_name)
+            if not pivot_data_sheet_name:
+                logging.error("피벗용 데이터 시트 생성 실패")
+                return None
+
+            # 세로형 데이터 시트를 소스로 사용
+            ws_source = wb.sheets[pivot_data_sheet_name]
+            
+            # 세로형 데이터 범위 확인 (A:예산과목, B:특성, C:값)
+            try:
+                used_range = ws_source.api.UsedRange
+                last_row = used_range.Row + used_range.Rows.Count - 1
+                source_range = ws_source.range(f'A1:C{last_row}')
+                logging.info(f"세로형 데이터 범위: {source_range.address}")
+            except:
+                # 수동으로 범위 찾기
+                last_row = 1
+                for row in range(1, 1000):  # 최대 1000행까지 확인
+                    if ws_source.range(f'A{row}').value is not None:
+                        last_row = row
+                source_range = ws_source.range(f'A1:C{last_row}')
+                logging.info(f"수동 범위 설정: {source_range.address}")
 
             logging.info(f"소스 데이터 범위: {source_range.address}")
 
@@ -3150,36 +3273,70 @@ class InteractivePivotGenerator:
             )
 
             # 2. 피벗 테이블 생성
+            logging.info("피벗 테이블 생성 중...")
             pivot_table = pivot_cache.CreatePivotTable(
                 TableDestination=ws_pivot.range('A3').api,
                 TableName='BudgetAnalysisPivot'
             )
+            logging.info("피벗 테이블 기본 구조 생성 완료")
 
-            # 3. 필드 배치
+            # 3. 필드 배치 (새로운 세로형 구조: 예산과목, 특성, 값)
+            logging.info("필드 배치 시작...")
+            
             # 행 필드: 예산과목
+            logging.info("예산과목 필드를 행 필드로 설정 중...")
             pivot_table.PivotFields('예산과목').Orientation = xw.constants.PivotFieldOrientation.xlRowField
+            logging.info("예산과목 행 필드 설정 완료")
 
-            # 값 필드들을 각각 추가 (열로 표시됨)
-            data_field1 = pivot_table.AddDataField(
-                pivot_table.PivotFields('예산금액'),
-                '예산금액',
-                xw.constants.ConsolidationFunction.xlSum
-            )
-            data_field1.NumberFormat = '#,##0'
+            # 열 필드: 특성 (예산금액, 지출액, 예산잔액, 집행률)
+            logging.info("특성 필드를 열 필드로 설정 중...")
+            pivot_table.PivotFields('특성').Orientation = xw.constants.PivotFieldOrientation.xlColumnField
+            logging.info("특성 열 필드 설정 완료")
 
-            data_field2 = pivot_table.AddDataField(
-                pivot_table.PivotFields('예산잔액'),
-                '예산잔액',
-                xw.constants.ConsolidationFunction.xlSum
-            )
-            data_field2.NumberFormat = '#,##0'
-
-            data_field3 = pivot_table.AddDataField(
-                pivot_table.PivotFields('집행률'),
-                '집행률',
-                xw.constants.ConsolidationFunction.xlAverage
-            )
-            data_field3.NumberFormat = '0.0%'
+            # 값 필드: 값
+            logging.info("값 필드를 데이터 필드로 설정 중...")
+            try:
+                # 사용 가능한 필드 확인
+                available_fields = [field.Name for field in pivot_table.PivotFields()]
+                logging.info(f"피벗 테이블 사용 가능한 필드들: {available_fields}")
+                
+                # 실제 값 필드명 찾기 (값, 값2, 값3 등 가능)
+                value_field_name = None
+                for field_name in available_fields:
+                    if field_name.startswith('값'):
+                        value_field_name = field_name
+                        break
+                
+                if not value_field_name:
+                    raise Exception("값 필드를 찾을 수 없습니다")
+                
+                logging.info(f"사용할 값 필드명: {value_field_name}")
+                value_field = pivot_table.PivotFields(value_field_name)
+                data_field = pivot_table.AddDataField(
+                    value_field,
+                    '값 합계',
+                    xw.constants.ConsolidationFunction.xlSum
+                )
+                logging.info("값 데이터 필드 추가 완료")
+                
+                # 총합계 행과 열 제거
+                logging.info("총합계 행과 열 제거 중...")
+                try:
+                    # 행 총합계 제거
+                    pivot_table.RowGrand = False
+                    logging.info("행 총합계 제거 완료")
+                    
+                    # 열 총합계 제거
+                    pivot_table.ColumnGrand = False
+                    logging.info("열 총합계 제거 완료")
+                except Exception as grand_error:
+                    logging.warning(f"총합계 제거 실패: {grand_error}")
+                
+                logging.info("피벗 테이블 필드 설정 완료")
+                    
+            except Exception as e:
+                logging.error(f"데이터 필드 추가 중 오류: {str(e)}")
+                return None
 
             logging.info("피벗 테이블 필드 구성 완료")
             return pivot_table
@@ -3249,28 +3406,29 @@ class InteractivePivotGenerator:
             except Exception as e:
                 logging.warning(f"예산과목 슬라이서 추가 실패: {str(e)}")
 
-            # 2. 측정항목 슬라이서 (Values 필드용)
+            # 2. 특성 필드 슬라이서 (예산금액, 지출액, 예산잔액, 집행률)
             try:
-                # Values 필드에 대한 슬라이서 생성 시도
-                slicer_cache_values = wb.api.SlicerCaches.Add2(
+                logging.info("특성 필드 슬라이서 추가 중...")
+                
+                slicer_cache_characteristics = wb.api.SlicerCaches.Add2(
                     pivot_table,
-                    '값'  # Values 필드의 한국어명
+                    '특성'
                 )
                 
                 metric_pos = slicer_positions['metric']
-                slicer_cache_values.Slicers.Add(
+                slicer_cache_characteristics.Slicers.Add(
                     SlicerDestination=ws_pivot.api,
-                    Name='MetricSlicer',
+                    Name='CharacteristicsSlicer',
                     Caption='측정항목 선택',
                     Top=metric_pos['top'],
                     Left=metric_pos['left'],
                     Width=metric_pos['width'],
                     Height=metric_pos['height']
                 )
-                logging.info("측정항목 슬라이서 추가 완료")
+                logging.info("특성 필드 슬라이서 추가 완료")
                 
             except Exception as e:
-                logging.warning(f"측정항목 슬라이서 추가 실패: {str(e)}")
-
+                logging.warning(f"특성 필드 슬라이서 추가 실패: {str(e)}")
+                
         except Exception as e:
             logging.error(f"슬라이서 추가 중 오류: {str(e)}")
