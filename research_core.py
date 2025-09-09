@@ -300,11 +300,26 @@ class ExcelExporter:
             if ENABLE_INTERACTIVE_PIVOT:
                 pivot_generator = InteractivePivotGenerator()
                 if pivot_generator.xlwings_available:
+                    # 기존 피벗 테이블 추가
                     success = pivot_generator.add_interactive_features(output_path)
                     if success:
                         logging.info("대화형 피벗 테이블 추가 완료")
                     else:
                         logging.warning("대화형 피벗 테이블 추가 실패")
+                    
+                    # 연도별 예산 비교 피벗 테이블 추가
+                    yearly_success = pivot_generator.create_yearly_budget_comparison(output_path)
+                    if yearly_success:
+                        logging.info("연도별 예산 비교 테이블 추가 완료")
+                    else:
+                        logging.warning("연도별 예산 비교 테이블 추가 실패")
+                    
+                    # 모든 시트 순서 최종 조정
+                    reorder_success = pivot_generator.reorder_all_sheets(output_path)
+                    if reorder_success:
+                        logging.info("전체 시트 순서 조정 완료")
+                    else:
+                        logging.warning("전체 시트 순서 조정 실패")
                 else:
                     logging.info("xlwings 사용 불가 - 정적 시트만 생성됨")
             else:
@@ -317,18 +332,45 @@ class ExcelExporter:
             return False
 
     def _reorder_sheets_with_dashboard_first(self, workbook):
-        '''시트 순서를 조정하여 대시보드를 첫 번째로 이동합니다.'''
+        '''시트 순서를 원하는 순서로 조정합니다.'''
         try:
-            # 현재 시트 순서 확인
-            sheet_names = workbook.sheetnames
+            # 원하는 시트 순서 정의
+            desired_order = [
+                '대시보드',
+                '총액',
+                '사업비',
+                '연구비',
+                '집행관리(사업비)',
+                '집행관리(연구비)',
+                '연도별예산비교',
+                '예산분석',
+                '연도별예산데이터',
+                '예산분석데이터'
+            ]
 
-            # 대시보드 시트가 있는지 확인
-            if '대시보드' in sheet_names:
-                # 대시보드 시트를 첫 번째로 이동
-                dashboard_sheet = workbook['대시보드']
-                workbook.move_sheet(dashboard_sheet, offset=-len(sheet_names))
-            else:
-                logging.warning("대시보드 시트를 찾을 수 없습니다.")
+            # 현재 시트 순서 확인
+            current_sheet_names = workbook.sheetnames
+            logging.info(f"현재 시트 순서: {current_sheet_names}")
+
+            # 원하는 순서대로 시트 배치
+            for target_index, sheet_name in enumerate(desired_order):
+                if sheet_name in current_sheet_names:
+                    # 현재 시트의 위치 찾기
+                    current_index = workbook.sheetnames.index(sheet_name)
+                    
+                    # 시트가 원하는 위치에 있지 않다면 이동
+                    if current_index != target_index:
+                        sheet = workbook[sheet_name]
+                        # 목표 위치로 이동 (offset 계산)
+                        offset = target_index - current_index
+                        workbook.move_sheet(sheet, offset=offset)
+                        logging.debug(f"시트 '{sheet_name}' 이동: {current_index} -> {target_index}")
+                else:
+                    logging.debug(f"시트 '{sheet_name}'를 찾을 수 없습니다.")
+
+            # 최종 시트 순서 로깅
+            final_sheet_names = workbook.sheetnames
+            logging.info(f"최종 시트 순서: {final_sheet_names}")
 
         except Exception as e:
             logging.error(f"시트 순서 조정 중 오류: {str(e)}")
@@ -1810,7 +1852,7 @@ class DashboardGenerator:
             pd.DataFrame: 대시보드용 데이터 (빈 DataFrame - 실제 대시보드는 Excel에서 직접 생성)
         '''
         try:
-            logging.info("KISS 연구비 집행 관리 대시보드 생성 시작 - 검정색 배경 적용")
+            logging.info("2025 차세대 국가대표 스포츠과학지원 사업 예산 현황 대시보드 생성 시작 - 검정색 배경 적용")
 
             # 대시보드는 Excel 워크시트에서 직접 생성하므로 빈 DataFrame 반환
             # 실제 대시보드 생성은 create_dashboard_in_worksheet 메서드에서 수행
@@ -1841,20 +1883,23 @@ class DashboardGenerator:
             # 3. 제목 및 헤더 생성 (현대적 테마)
             self._create_modern_dashboard_header(worksheet)
 
-            # 4. KPI 지표 섹션 생성 (총액 시트 참조)
+            # 4. 사업 기본 정보 섹션 생성 (B5에 배치)
+            self._create_project_info_section(worksheet)
+
+            # 5. KPI 지표 섹션 생성 (총액 시트 참조)
             self._create_modern_kpi_section(worksheet, excel_refs)
 
-            # 5. 차트 섹션 생성 (총액 시트 참조)
+            # 6. 차트 섹션 생성 (총액 시트 참조)
             self._create_modern_chart_section(worksheet, excel_refs)
 
-            # 6. 예산과목별 지표 섹션 생성 (B26에 추가)
+            # 7. 예산과목별 지표 섹션 생성 (B25에 추가) - 위치 조정
             self._create_budget_item_indicators_section(worksheet, total_sheet_data)
 
-            # 7. 현대적 스타일링 적용
+            # 8. 현대적 스타일링 적용
             self._apply_modern_dashboard_styling(worksheet)
 
-            # 8. 최종 섹션 구분선 추가
-            self._add_section_divider(worksheet, 'B50', 'K50', '대시보드 완료')
+            # 9. 최종 섹션 구분선 추가 - 위치 조정
+            self._add_section_divider(worksheet, 'B48', 'K48', '대시보드 완료')
 
         except Exception as e:
             logging.error(f"대시보드 워크시트 생성 중 오류: {str(e)}")
@@ -1915,13 +1960,14 @@ class DashboardGenerator:
 
             # 컬럼 너비 설정 (더 넓게)
             worksheet.column_dimensions['A'].width = 3   # 여백
-            worksheet.column_dimensions['B'].width = 25  # 라벨
+            worksheet.column_dimensions['B'].width = 25  # 라벨 (KPI 카드와 통일)
             worksheet.column_dimensions['C'].width = 20  # 값
-            worksheet.column_dimensions['D'].width = 3   # 여백
+            worksheet.column_dimensions['D'].width = 25  # KPI 카드와 통일
             worksheet.column_dimensions['E'].width = 25  # 차트 영역
-            worksheet.column_dimensions['F'].width = 25  # 차트 영역
+            worksheet.column_dimensions['F'].width = 25  # 차트 영역 (KPI 카드와 통일)
             worksheet.column_dimensions['G'].width = 25  # 차트 영역
-            worksheet.column_dimensions['H'].width = 3   # 여백
+            worksheet.column_dimensions['H'].width = 25  # KPI 카드와 통일
+            worksheet.column_dimensions['J'].width = 25  # KPI 카드와 통일
 
             # 행 높이 설정 (더 높게)
             for row in range(1, 35):
@@ -1938,7 +1984,7 @@ class DashboardGenerator:
             from openpyxl.styles import Font, Alignment, PatternFill
 
             # 메인 제목 (흰색 텍스트)
-            worksheet['B2'] = "KISS 연구비 집행 관리 대시보드"
+            worksheet['B2'] = "2025 차세대 국가대표 스포츠과학지원 사업 예산 현황"
             worksheet['B2'].font = Font(name='맑은 고딕', size=28, bold=True, color='FFFFFF')  # 흰색
             worksheet['B2'].alignment = Alignment(horizontal='left', vertical='center')
 
@@ -1974,15 +2020,15 @@ class DashboardGenerator:
             # 고급스러운 컬럼 너비 설정 (V열까지 확장)
             column_widths = {
                 'A': 3,   # 여백
-                'B': 22,  # 메인 콘텐츠
-                'C': 20,  # KPI 카드
-                'D': 20,  # KPI 카드
-                'E': 20,  # KPI 카드
-                'F': 20,  # KPI 카드
-                'G': 20,  # KPI 카드
-                'H': 18,  # 추가 KPI
-                'I': 18,  # 차트 영역
-                'J': 18,  # 차트 영역
+                'B': 25,  # 메인 콘텐츠 (KPI 카드 폭 통일)
+                'C': 20,  # 여백
+                'D': 25,  # KPI 카드 (폭 확장)
+                'E': 20,  # 여백
+                'F': 25,  # KPI 카드 (폭 통일)
+                'G': 20,  # 여백
+                'H': 25,  # KPI 카드 (폭 통일)
+                'I': 20,  # 여백
+                'J': 25,  # KPI 카드 (폭 통일)
                 'K': 18,  # 차트 영역
                 'L': 18,  # 차트 영역
                 'M': 18,  # 차트 영역
@@ -2009,12 +2055,12 @@ class DashboardGenerator:
                 5: 20,   # 여백 (섹션 구분)
                 6: 35,   # KPI 섹션 제목 (더 크게)
                 7: 15,   # 여백
-                8: 40,   # KPI 카드 제목 (더 크게)
-                9: 45,   # KPI 카드 값 (더 크게)
+                8: 35,   # KPI 카드 제목 (더 크게)
+                9: 35,   # KPI 카드 값 (더 크게)
                 10: 8,   # 그림자 효과
                 11: 25,  # 섹션 구분 여백
                 12: 35,  # 확장 KPI 섹션 제목
-                13: 15,  # 여백
+                13: 40,  # 여백 (14번째와 동일하게)
                 14: 40,  # 확장 KPI 카드 제목
                 15: 45,  # 확장 KPI 카드 값
                 16: 8,   # 그림자 효과
@@ -2040,7 +2086,7 @@ class DashboardGenerator:
             from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
             # 메인 제목 (실버 텍스트 + 그림자 효과)
-            worksheet['B2'] = "KISS 연구비 집행 관리 대시보드"
+            worksheet['B2'] = "2025 차세대 국가대표 스포츠과학지원 사업 예산 현황"
             worksheet['B2'].font = Font(name='맑은 고딕', size=32, bold=True, color=self.color_palette['silver_accent'])
             worksheet['B2'].alignment = Alignment(horizontal='left', vertical='center')
 
@@ -2079,6 +2125,85 @@ class DashboardGenerator:
         except Exception as e:
             logging.error(f"대시보드 헤더 생성 중 오류: {str(e)}")
 
+    def _create_project_info_section(self, worksheet):
+        '''사업 기본 정보 섹션을 생성합니다. (B5에 배치)'''
+        try:
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+            from config import YEARLY_BUDGET_DATA
+            
+            # 사업 정보 배경 (반투명 회색)
+            info_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
+                                  end_color=self.color_palette['translucent_gray'], fill_type='solid')
+            
+            # 고급스러운 테두리
+            info_border = Border(
+                left=Side(style='thin', color=self.color_palette['silver_accent']),
+                right=Side(style='thin', color=self.color_palette['silver_accent']),
+                top=Side(style='thin', color=self.color_palette['silver_accent']),
+                bottom=Side(style='thin', color=self.color_palette['silver_accent'])
+            )
+
+            # 사업기간 정보 (B5:C5)
+            worksheet['B5'] = "사업기간"
+            worksheet['B5'].font = Font(name='맑은 고딕', size=11, bold=True, color=self.color_palette['white_text'])
+            worksheet['B5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['B5'].fill = info_fill
+            worksheet['B5'].border = info_border
+
+            worksheet['C5'] = "2025.03.01 ~ 2026.02.28"
+            worksheet['C5'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['info_blue'])
+            worksheet['C5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['C5'].fill = info_fill
+            worksheet['C5'].border = info_border
+
+            # 총예산 정보 (D5:E5)
+            worksheet['D5'] = "총예산"
+            worksheet['D5'].font = Font(name='맑은 고딕', size=11, bold=True, color=self.color_palette['white_text'])
+            worksheet['D5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['D5'].fill = info_fill
+            worksheet['D5'].border = info_border
+
+            # 2025년 총예산 계산 (예산과목: 금액 딕셔너리의 합)
+            total_budget = sum(YEARLY_BUDGET_DATA['2025'].values())
+            worksheet['E5'] = f'=TEXT({total_budget},"#,##0")'
+            worksheet['E5'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['success_green'])
+            worksheet['E5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['E5'].fill = info_fill
+            worksheet['E5'].border = info_border
+
+            # 사업진행률 정보 (F5:G5)
+            worksheet['F5'] = "사업진행률"
+            worksheet['F5'].font = Font(name='맑은 고딕', size=11, bold=True, color=self.color_palette['white_text'])
+            worksheet['F5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['F5'].fill = info_fill
+            worksheet['F5'].border = info_border
+
+            # 사업진행률 계산 (현재 날짜 기준)
+            from datetime import datetime, date
+            start_date = date(2025, 3, 1)
+            end_date = date(2026, 2, 28)
+            current_date = datetime.now().date()
+            
+            if current_date < start_date:
+                progress_rate = 0
+            elif current_date > end_date:
+                progress_rate = 100
+            else:
+                total_days = (end_date - start_date).days
+                elapsed_days = (current_date - start_date).days
+                progress_rate = (elapsed_days / total_days) * 100
+
+            worksheet['G5'] = f'"{progress_rate:.1f}%"'
+            worksheet['G5'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['warning_orange'])
+            worksheet['G5'].alignment = Alignment(horizontal='center', vertical='center')
+            worksheet['G5'].fill = info_fill
+            worksheet['G5'].border = info_border
+
+            logging.info("사업 기본 정보 섹션 생성 완료")
+
+        except Exception as e:
+            logging.error(f"사업 기본 정보 섹션 생성 중 오류: {str(e)}")
+
     def _create_modern_kpi_section(self, worksheet, excel_refs: dict):
         '''현대적 스타일의 KPI 지표 섹션을 생성합니다. (총액 시트 참조)'''
         try:
@@ -2086,7 +2211,7 @@ class DashboardGenerator:
 
             logging.info("현대적 KPI 섹션 생성 시작 - 총액 시트 참조")
 
-            # KPI 섹션 제목 (실버 텍스트)
+            # KPI 섹션 제목 (실버 텍스트) - 레이아웃에 맞춰 B6에 배치
             worksheet['B6'] = "핵심 성과 지표 (KPI)"
             worksheet['B6'].font = Font(name='맑은 고딕', size=18, bold=True, color=self.color_palette['silver_accent'])
 
@@ -2102,6 +2227,7 @@ class DashboardGenerator:
             if excel_refs['total_row_index'] is not None:
                 total_row = excel_refs['total_row_index']
 
+                # 기존 KPI 카드들: 레이아웃(행 8/9)에 맞춰 배치
                 # 총액 집행률 카드 (총액 시트 참조) - 동적 색상
                 self._create_modern_kpi_card_with_formula(
                     worksheet, 'B8', '총액 집행률',
@@ -2109,32 +2235,41 @@ class DashboardGenerator:
                     self.color_palette['success_green'], card_border
                 )
 
+                # 인건비제외 집행률 카드 (인건비 항목 제외한 집행률)
+                self._create_modern_kpi_card_with_formula(
+                    worksheet, 'D8', '인건비제외 집행률',
+                    f'=IFERROR(ROUND((총액!{excel_refs["center_col"]}{excel_refs["total_row_index"]}+총액!{excel_refs["research_col"]}{excel_refs["total_row_index"]})/(총액!{excel_refs["budget_col"]}{excel_refs["total_row_index"]}-총액!D4-총액!D5)*100,1)&"%","0%")',  # 인건비를 제외한 집행률 계산 (인건비 예산 제외)
+                    self.color_palette['info_blue'], card_border
+                )
+
                 # 센터 집행률 카드 (총액 시트 참조)
                 self._create_modern_kpi_card_with_formula(
-                    worksheet, 'D8', '센터 집행률',
+                    worksheet, 'F8', '센터 집행률',
                     f'=ROUND(총액!{excel_refs["center_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)&"%"',
                     self.color_palette['info_blue'], card_border
                 )
 
                 # 심층연구 집행률 카드 (총액 시트 참조)
                 self._create_modern_kpi_card_with_formula(
-                    worksheet, 'F8', '심층연구 집행률',
+                    worksheet, 'H8', '심층연구 집행률',
                     f'=ROUND(총액!{excel_refs["research_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)&"%"',
                     self.color_palette['warning_orange'], card_border
                 )
 
                 # 예산 잔액 카드 (총액 시트 참조) - 천 단위 구분자 적용
                 self._create_modern_kpi_card_with_formula(
-                    worksheet, 'H8', '예산 잔액',
+                    worksheet, 'J8', '예산 잔액',
                     f'=TEXT(총액!{excel_refs["remaining_col"]}{total_row},"#,##0")',
                     self.color_palette['silver_accent'], card_border
                 )
+
             else:
-                # 총액 시트 참조가 없는 경우 기본값
+                # 총액 시트 참조가 없는 경우 기본값 (동일한 행 배치 규칙 적용)
                 self._create_modern_kpi_card_with_formula(worksheet, 'B8', '총액 집행률', '0%', self.color_palette['success_green'], card_border)
-                self._create_modern_kpi_card_with_formula(worksheet, 'D8', '센터 집행률', '0%', self.color_palette['info_blue'], card_border)
-                self._create_modern_kpi_card_with_formula(worksheet, 'F8', '심층연구 집행률', '0%', self.color_palette['warning_orange'], card_border)
-                self._create_modern_kpi_card_with_formula(worksheet, 'H8', '예산 잔액', '"0"', self.color_palette['silver_accent'], card_border)
+                self._create_modern_kpi_card_with_formula(worksheet, 'D8', '인건비제외 집행률', '0%', self.color_palette['info_blue'], card_border)
+                self._create_modern_kpi_card_with_formula(worksheet, 'F8', '센터 집행률', '0%', self.color_palette['info_blue'], card_border)
+                self._create_modern_kpi_card_with_formula(worksheet, 'H8', '심층연구 집행률', '0%', self.color_palette['warning_orange'], card_border)
+                self._create_modern_kpi_card_with_formula(worksheet, 'J8', '예산 잔액', '"0"', self.color_palette['silver_accent'], card_border)
 
         except Exception as e:
             logging.error(f"KPI 섹션 생성 중 오류: {str(e)}")
@@ -2195,46 +2330,46 @@ class DashboardGenerator:
 
             logging.info("현대적 차트 섹션 생성 시작 - 총액 시트 참조")
 
-            # 차트 섹션 제목 (실버 텍스트) - 위치 조정 (기본 KPI 아래)
+            # 차트 섹션 제목 (확장 KPI 아래 시작)
             worksheet['B12'] = "데이터 시각화 차트"
             worksheet['B12'].font = Font(name='맑은 고딕', size=18, bold=True, color=self.color_palette['silver_accent'])
 
-            # 집행률 섹션 제목 추가 (B14, 데이터 시각화 차트와 동일한 스타일)
-            worksheet['B14'] = "집행률"
-            worksheet['B14'].font = Font(name='맑은 고딕', size=18, bold=True, color=self.color_palette['silver_accent'])
+            # 집행률 소제목 (차트 섹션 하위)
+            worksheet['B13'] = "집행률"
+            worksheet['B13'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
 
-            # 집행률 비교 차트 생성 (총액 시트 참조) - B15로 이동
+            # 집행률 비교 차트 생성 (총액 시트 참조) - 차트는 14행부터 시작하도록 조정
             self._create_modern_execution_rate_chart(worksheet, excel_refs)
 
-            # 예산 배분 섹션 제목 추가 (B20, 같은 스타일)
-            worksheet['B20'] = "예산 배분"
-            worksheet['B20'].font = Font(name='맑은 고딕', size=18, bold=True, color=self.color_palette['silver_accent'])
+            # 예산 배분 섹션 제목 추가 (차트 섹션 하위)
+            worksheet['B19'] = "예산 배분"
+            worksheet['B19'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
 
-            # 예산 vs 집행 현황 차트 생성 (총액 시트 참조) - B21로 이동
+            # 예산 vs 집행 현황 차트 생성 (총액 시트 참조)
             self._create_modern_budget_vs_execution_chart(worksheet, excel_refs)
 
         except Exception as e:
             logging.error(f"차트 섹션 생성 중 오류: {str(e)}")
 
     def _create_budget_item_indicators_section(self, worksheet, total_sheet_data: pd.DataFrame):
-        '''대시보드에 예산과목별 지표 섹션을 생성합니다. (B26에 추가)'''
+        '''대시보드에 예산과목별 지표 섹션을 생성합니다. (B25에 추가)'''
         try:
             from openpyxl.styles import Font, Alignment, PatternFill
 
             logging.info("대시보드 예산과목별 지표 섹션 생성 시작")
 
-            # B26에 섹션 제목 추가 (대시보드 스타일에 맞춰)
-            worksheet['B26'] = "예산과목별 지표"
-            worksheet['B26'].font = Font(name='맑은 고딕', size=18, bold=True, color=self.color_palette['silver_accent'])
-            worksheet['B26'].alignment = Alignment(horizontal='left', vertical='center')
+            # B25에 섹션 제목 추가 (대시보드 스타일에 맞춰) - 위치 조정
+            worksheet['B25'] = "예산과목별 지표"
+            worksheet['B25'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
+            worksheet['B25'].alignment = Alignment(horizontal='left', vertical='center')
 
             # 차트 섹션과 동일한 스타일 적용 (반투명 회색 배경)
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
 
-            # B27~E27에 헤더 추가
+            # B26~E26에 헤더 추가 - 위치 조정
             headers = ['예산과목', '집행률(%)', '예산금액', '예산잔액']
-            header_cells = ['B27', 'C27', 'D27', 'E27']
+            header_cells = ['B26', 'C26', 'D26', 'E26']
 
             for header, cell_ref in zip(headers, header_cells):
                 cell = worksheet[cell_ref]
@@ -2256,8 +2391,8 @@ class DashboardGenerator:
                         '집행률': row['집행률']
                     })
 
-            # 데이터 행 추가 (B28부터 시작)
-            start_row = 28
+            # 데이터 행 추가 (B27부터 시작) - 위치 조정
+            start_row = 27
 
             for i, item in enumerate(budget_items_data):
                 row_num = start_row + i
@@ -2303,10 +2438,13 @@ class DashboardGenerator:
                 remaining_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
 
             # 컬럼 너비 조정 (대시보드에 맞게)
-            worksheet.column_dimensions['B'].width = 25  # 예산과목
+            worksheet.column_dimensions['B'].width = 25  # 예산과목 (KPI 카드와 통일)
             worksheet.column_dimensions['C'].width = 12  # 집행률
-            worksheet.column_dimensions['D'].width = 15  # 예산금액
+            worksheet.column_dimensions['D'].width = 25  # 예산금액 (KPI 카드와 통일)
             worksheet.column_dimensions['E'].width = 15  # 예산잔액
+            worksheet.column_dimensions['F'].width = 25  # KPI 카드와 통일
+            worksheet.column_dimensions['H'].width = 25  # KPI 카드와 통일
+            worksheet.column_dimensions['J'].width = 25  # KPI 카드와 통일
 
             # 예산과목별 지표 그래프 추가 (테이블 옆에) - 제거됨
             # self._create_budget_item_charts(worksheet, len(budget_items_data))
@@ -2323,7 +2461,7 @@ class DashboardGenerator:
 
             logging.info("예산과목별 지표 그래프 생성 시작")
 
-            # 1. 예산잔액 막대그래프 (E27:I35)
+            # 1. 예산잔액 막대그래프 (E22:I30)
             budget_chart = BarChart()
             budget_chart.type = "col"
             budget_chart.style = 10
@@ -2332,8 +2470,8 @@ class DashboardGenerator:
             budget_chart.x_axis.title = None  # X축 제목 제거
 
             # 예산잔액 데이터 참조 (D열)
-            budget_data = Reference(worksheet, min_col=4, min_row=28, max_row=27+data_count, max_col=4)
-            budget_categories = Reference(worksheet, min_col=2, min_row=28, max_row=27+data_count, max_col=2)
+            budget_data = Reference(worksheet, min_col=4, min_row=23, max_row=22+data_count, max_col=4)
+            budget_categories = Reference(worksheet, min_col=2, min_row=23, max_row=22+data_count, max_col=2)
 
             budget_chart.add_data(budget_data, titles_from_data=False)
             budget_chart.set_categories(budget_categories)
@@ -2366,9 +2504,9 @@ class DashboardGenerator:
                 logging.warning(f"예산잔액 차트 데이터 레이블 적용 실패: {str(label_e)}")
 
             # 차트를 워크시트에 추가
-            worksheet.add_chart(budget_chart, "E27")
+            worksheet.add_chart(budget_chart, "E22")
 
-            # 2. 집행률 막대그래프 (E37:I45)
+            # 2. 집행률 막대그래프 (E32:I40)
             execution_chart = BarChart()
             execution_chart.type = "col"
             execution_chart.style = 11
@@ -2377,8 +2515,8 @@ class DashboardGenerator:
             execution_chart.x_axis.title = None  # X축 제목 제거
 
             # 집행률 데이터 참조 (C열)
-            execution_data = Reference(worksheet, min_col=3, min_row=28, max_row=27+data_count, max_col=3)
-            execution_categories = Reference(worksheet, min_col=2, min_row=28, max_row=27+data_count, max_col=2)
+            execution_data = Reference(worksheet, min_col=3, min_row=23, max_row=22+data_count, max_col=3)
+            execution_categories = Reference(worksheet, min_col=2, min_row=23, max_row=22+data_count, max_col=2)
 
             execution_chart.add_data(execution_data, titles_from_data=False)
             execution_chart.set_categories(execution_categories)
@@ -2411,7 +2549,7 @@ class DashboardGenerator:
                 logging.warning(f"집행률 차트 데이터 레이블 적용 실패: {str(label_e)}")
 
             # 차트를 워크시트에 추가
-            worksheet.add_chart(execution_chart, "E38")
+            worksheet.add_chart(execution_chart, "E33")
 
             logging.info("예산과목별 지표 그래프 생성 완료")
 
@@ -2439,41 +2577,41 @@ class DashboardGenerator:
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
 
-            # 집행률 차트 제목 추가 (D14에 차트 제목)
-            worksheet['D14'] = "집행률 비교"
-            worksheet['D14'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
+            # 집행률 차트 제목 추가 (D13에 차트 제목) - 위치 조정
+            worksheet['D13'] = "집행률 비교"
+            worksheet['D13'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
 
-            # 위치 조정 (집행률 제목 아래 B15부터 시작)
-            worksheet['B15'] = "구분"
-            worksheet['C15'] = "집행률(%)"
-            worksheet['B15'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
-            worksheet['C15'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
-            worksheet['B15'].fill = chart_fill
-            worksheet['C15'].fill = chart_fill
+            # 위치 조정 (집행률 제목 아래 B14부터 시작)
+            worksheet['B14'] = "구분"
+            worksheet['C14'] = "집행률(%)"
+            worksheet['B14'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
+            worksheet['C14'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
+            worksheet['B14'].fill = chart_fill
+            worksheet['C14'].fill = chart_fill
 
             # 총액 시트 참조 수식으로 데이터 설정 (위치 조정)
             if excel_refs['total_row_index'] is not None:
                 total_row = excel_refs['total_row_index']
 
-                worksheet['B16'] = "총액"
-                worksheet['C16'] = f'=ROUND((총액!{excel_refs["center_col"]}{total_row}+총액!{excel_refs["research_col"]}{total_row})/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
+                worksheet['B15'] = "총액"
+                worksheet['C15'] = f'=ROUND((총액!{excel_refs["center_col"]}{total_row}+총액!{excel_refs["research_col"]}{total_row})/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
 
-                worksheet['B17'] = "센터"
-                worksheet['C17'] = f'=ROUND(총액!{excel_refs["center_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
+                worksheet['B16'] = "센터"
+                worksheet['C16'] = f'=ROUND(총액!{excel_refs["center_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
 
-                worksheet['B18'] = "심층연구"
-                worksheet['C18'] = f'=ROUND(총액!{excel_refs["research_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
+                worksheet['B17'] = "심층연구"
+                worksheet['C17'] = f'=ROUND(총액!{excel_refs["research_col"]}{total_row}/총액!{excel_refs["budget_col"]}{total_row}*100,1)'
             else:
                 # 기본값
-                worksheet['B16'] = "총액"
+                worksheet['B15'] = "총액"
+                worksheet['C15'] = 0
+                worksheet['B16'] = "센터"
                 worksheet['C16'] = 0
-                worksheet['B17'] = "센터"
+                worksheet['B17'] = "심층연구"
                 worksheet['C17'] = 0
-                worksheet['B18'] = "심층연구"
-                worksheet['C18'] = 0
 
             # 데이터 셀 스타일링 (위치 조정)
-            for row in range(16, 19):
+            for row in range(15, 18):
                 worksheet[f'B{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'C{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'B{row}'].fill = chart_fill
@@ -2487,9 +2625,9 @@ class DashboardGenerator:
             chart.y_axis.title = None  # Y축 제목 제거
             chart.x_axis.title = None  # X축 제목 제거
 
-            # 데이터 범위 설정 (위치 조정 - B15부터 시작)
-            data = Reference(worksheet, min_col=3, min_row=15, max_row=18, max_col=3)
-            cats = Reference(worksheet, min_col=2, min_row=16, max_row=18)
+            # 데이터 범위 설정 (위치 조정 - B14부터 시작)
+            data = Reference(worksheet, min_col=3, min_row=14, max_row=17, max_col=3)
+            cats = Reference(worksheet, min_col=2, min_row=15, max_row=17)
 
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(cats)
@@ -2551,8 +2689,8 @@ class DashboardGenerator:
             except Exception as e:
                 logging.warning(f"차트 배경색 설정 실패: {str(e)}")
 
-            # 차트 위치 설정 (좌측 배치 - D15로 이동)
-            chart.anchor = "D15"
+            # 차트 위치 설정 (좌측 배치 - KPI 영역 아래로 이동)
+            chart.anchor = "D14"
             chart.width = 14
             chart.height = 10
 
@@ -2571,47 +2709,47 @@ class DashboardGenerator:
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
 
-            # 예산 배분 차트 제목 추가 (H14에 차트 제목)
-            worksheet['H14'] = "예산 배분 현황"
-            worksheet['H14'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
+            # 예산 배분 차트 제목 추가 (H13에 차트 제목) - 위치 조정
+            worksheet['H13'] = "예산 배분 현황"
+            worksheet['H13'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
 
-            # 예산 배분 차트 데이터 (예산 배분 제목 아래 B21부터 시작)
-            worksheet['B21'] = "구분"
-            worksheet['C21'] = "금액"
-            worksheet['B21'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
-            worksheet['C21'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
-            worksheet['B21'].fill = chart_fill
-            worksheet['C21'].fill = chart_fill
+            # 예산 배분 차트 데이터 (예산 배분 제목 아래 B20부터 시작) - 위치 조정
+            worksheet['B20'] = "구분"
+            worksheet['C20'] = "금액"
+            worksheet['B20'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
+            worksheet['C20'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
+            worksheet['B20'].fill = chart_fill
+            worksheet['C20'].fill = chart_fill
 
-            # 총액 시트 참조 수식으로 데이터 설정 (B21부터 시작) - 천 단위 구분자 적용
+            # 총액 시트 참조 수식으로 데이터 설정 (B21부터 시작) - 위치 조정, 천 단위 구분자 적용
             if excel_refs['total_row_index'] is not None:
                 total_row = excel_refs['total_row_index']
 
-                worksheet['B22'] = "센터"
-                worksheet['C22'] = f'=총액!{excel_refs["center_col"]}{total_row}'
+                worksheet['B21'] = "센터"
+                worksheet['C21'] = f'=총액!{excel_refs["center_col"]}{total_row}'
 
-                worksheet['B23'] = "심층연구"
-                worksheet['C23'] = f'=총액!{excel_refs["research_col"]}{total_row}'
+                worksheet['B22'] = "심층연구"
+                worksheet['C22'] = f'=총액!{excel_refs["research_col"]}{total_row}'
 
-                worksheet['B24'] = "예산잔액"
-                worksheet['C24'] = f'=총액!{excel_refs["remaining_col"]}{total_row}'
+                worksheet['B23'] = "예산잔액"
+                worksheet['C23'] = f'=총액!{excel_refs["remaining_col"]}{total_row}'
             else:
                 # 기본값
-                worksheet['B22'] = "센터"
+                worksheet['B21'] = "센터"
+                worksheet['C21'] = 0
+                worksheet['B22'] = "심층연구"
                 worksheet['C22'] = 0
-                worksheet['B23'] = "심층연구"
+                worksheet['B23'] = "예산잔액"
                 worksheet['C23'] = 0
-                worksheet['B24'] = "예산잔액"
-                worksheet['C24'] = 0
 
-            # 데이터 셀 스타일링 (예산 배분 차트) - 천 단위 구분자 적용
-            for row in range(21, 25):
+            # 데이터 셀 스타일링 (예산 배분 차트) - 천 단위 구분자 적용, 위치 조정
+            for row in range(20, 24):
                 worksheet[f'B{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'C{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'B{row}'].fill = chart_fill
                 worksheet[f'C{row}'].fill = chart_fill
                 # 금액 컬럼에 천 단위 구분자 적용
-                if row >= 22:  # 데이터 행에만 적용 (헤더 제외)
+                if row >= 21:  # 데이터 행에만 적용 (헤더 제외)
                     worksheet[f'C{row}'].number_format = '#,##0'
 
             # 파이 차트 생성 (내부 제목 제거)
@@ -2619,9 +2757,9 @@ class DashboardGenerator:
             chart.title = None  # 차트 내부 제목 제거
             # chart.style = 2
 
-            # 데이터 범위 설정 (예산 배분 제목 아래 B21-C24 영역)
-            data = Reference(worksheet, min_col=3, min_row=21, max_row=24, max_col=3)
-            cats = Reference(worksheet, min_col=2, min_row=22, max_row=24)
+            # 데이터 범위 설정 (예산 배분 제목 아래 B20-C23 영역) - 위치 조정
+            data = Reference(worksheet, min_col=3, min_row=20, max_row=23, max_col=3)
+            cats = Reference(worksheet, min_col=2, min_row=21, max_row=23)
 
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(cats)
@@ -2681,8 +2819,8 @@ class DashboardGenerator:
             except Exception as e:
                 logging.warning(f"차트 배경색 설정 실패: {str(e)}")
 
-            # 차트 위치 설정 (우측 배치 - H15에서 시작)
-            chart.anchor = "H15"
+            # 차트 위치 설정 (우측 배치 - KPI 영역 아래로 이동)
+            chart.anchor = "H14"
             chart.width = 14
             chart.height = 10
 
@@ -3132,11 +3270,11 @@ class InteractivePivotGenerator:
             return False
 
     def _create_pivot_data_sheet(self, wb, source_sheet_name: str) -> str:
-        '''피벗 테이블용 세로형 데이터 시트 생성'''
+        '''예산분석용 세로형 데이터 시트 생성'''
         try:
             import xlwings as xw
             
-            logging.info("피벗용 세로형 데이터 시트 생성 시작")
+            logging.info("예산분석용 세로형 데이터 시트 생성 시작")
             
             # 원본 데이터 읽기
             ws_source = wb.sheets[source_sheet_name]
@@ -3145,16 +3283,16 @@ class InteractivePivotGenerator:
             logging.info(f"원본 데이터 범위: {source_range.address}, 행 수: {source_range.shape[0]}")
             
             # 새 시트 생성
-            pivot_data_sheet_name = '피벗데이터'
+            pivot_data_sheet_name = '예산분석데이터'
             try:
                 # 기존 시트가 있으면 삭제
                 wb.sheets[pivot_data_sheet_name].delete()
-                logging.info("기존 피벗데이터 시트 삭제")
+                logging.info("기존 예산분석데이터 시트 삭제")
             except:
                 pass
             
             ws_pivot_data = wb.sheets.add(pivot_data_sheet_name)
-            logging.info(f"새 피벗데이터 시트 생성: {pivot_data_sheet_name}")
+            logging.info(f"새 예산분석데이터 시트 생성: {pivot_data_sheet_name}")
             
             # 헤더 설정
             ws_pivot_data.range('A1').value = '예산과목'
@@ -3219,19 +3357,19 @@ class InteractivePivotGenerator:
                     ws_pivot_data.range(f'C{row_idx}').value = execution_rate
                     row_idx += 1
             
-            logging.info(f"피벗용 세로형 데이터 생성 완료: {row_idx-1}개 행")
+            logging.info(f"예산분석용 세로형 데이터 생성 완료: {row_idx-1}개 행")
             
             # 즉시 저장하여 데이터 확정
             try:
                 wb.save()
-                logging.info("피벗 데이터 시트 저장 완료")
+                logging.info("예산분석 데이터 시트 저장 완료")
             except Exception as save_error:
-                logging.warning(f"피벗 데이터 시트 저장 실패: {save_error}")
+                logging.warning(f"예산분석 데이터 시트 저장 실패: {save_error}")
             
             return pivot_data_sheet_name
             
         except Exception as e:
-            logging.error(f"피벗용 데이터 시트 생성 중 오류: {str(e)}")
+            logging.error(f"예산분석용 데이터 시트 생성 중 오류: {str(e)}")
             return None
 
     def _create_pivot_table(self, wb, source_sheet_name: str, ws_pivot) -> object:
@@ -3432,3 +3570,354 @@ class InteractivePivotGenerator:
                 
         except Exception as e:
             logging.error(f"슬라이서 추가 중 오류: {str(e)}")
+
+    def create_yearly_budget_comparison(self, file_path: str) -> bool:
+        '''연도별 예산 비교용 피벗 테이블과 차트를 생성합니다.'''
+        if not self.xlwings_available:
+            logging.info("xlwings를 사용할 수 없어 연도별 비교 기능을 건너뜁니다.")
+            return False
+
+        try:
+            import xlwings as xw
+            from config import YEARLY_BUDGET_DATA, create_yearly_pivot_data, get_all_budget_items
+
+            logging.info(f"연도별 예산 비교 테이블 생성 시작: {file_path}")
+
+            with xw.App(visible=True, add_book=False) as app:
+                wb = app.books.open(file_path)
+                
+                # 연도별 예산 데이터 시트 생성
+                yearly_data_sheet_name = self._create_yearly_budget_data_sheet(wb)
+                if not yearly_data_sheet_name:
+                    logging.error("연도별 예산 데이터 시트 생성 실패")
+                    return False
+
+                # 연도별 비교 피벗 테이블 시트 생성
+                yearly_pivot_sheet_name = '연도별예산비교'
+                try:
+                    wb.sheets[yearly_pivot_sheet_name].delete()
+                except:
+                    pass
+                
+                ws_yearly_pivot = wb.sheets.add(yearly_pivot_sheet_name)
+                
+                # 연도별 피벗 테이블 생성
+                yearly_pivot_table = self._create_yearly_pivot_table(wb, yearly_data_sheet_name, ws_yearly_pivot)
+                if yearly_pivot_table:
+                    # 연도별 비교 차트 생성
+                    self._add_yearly_comparison_chart(ws_yearly_pivot, yearly_pivot_table)
+                    
+                    # 연도별 슬라이서 추가
+                    self._add_yearly_slicers(wb, yearly_pivot_table, ws_yearly_pivot)
+
+                wb.save()
+                logging.info("연도별 예산 비교 테이블 생성 완료")
+                return True
+
+        except Exception as e:
+            logging.error(f"연도별 예산 비교 테이블 생성 중 오류: {str(e)}")
+            return False
+
+    def _create_yearly_budget_data_sheet(self, wb) -> str:
+        '''연도별 예산 데이터를 세로형으로 변환한 시트를 생성합니다.'''
+        try:
+            import xlwings as xw
+            from config import YEARLY_BUDGET_DATA
+
+            logging.info("연도별 예산 세로형 데이터 시트 생성 시작")
+
+            # 새 시트 생성
+            yearly_data_sheet_name = '연도별예산데이터'
+            try:
+                wb.sheets[yearly_data_sheet_name].delete()
+                logging.info("기존 연도별예산데이터 시트 삭제")
+            except:
+                pass
+
+            ws_yearly_data = wb.sheets.add(yearly_data_sheet_name)
+            logging.info(f"새 연도별예산데이터 시트 생성: {yearly_data_sheet_name}")
+
+            # 헤더 설정
+            ws_yearly_data.range('A1').value = '연도'
+            ws_yearly_data.range('B1').value = '예산과목'
+            ws_yearly_data.range('C1').value = '예산금액'
+
+            # 데이터 변환
+            row_idx = 2  # 데이터 시작 행
+
+            for year, budget_data in YEARLY_BUDGET_DATA.items():
+                for budget_item, amount in budget_data.items():
+                    ws_yearly_data.range(f'A{row_idx}').value = year
+                    ws_yearly_data.range(f'B{row_idx}').value = budget_item
+                    ws_yearly_data.range(f'C{row_idx}').value = amount
+                    row_idx += 1
+
+            logging.info(f"연도별 예산 세로형 데이터 생성 완료: {row_idx-1}개 행")
+
+            # 즉시 저장하여 데이터 확정
+            try:
+                wb.save()
+                logging.info("연도별 예산 데이터 시트 저장 완료")
+            except Exception as save_error:
+                logging.warning(f"연도별 예산 데이터 시트 저장 실패: {save_error}")
+
+            return yearly_data_sheet_name
+
+        except Exception as e:
+            logging.error(f"연도별 예산 데이터 시트 생성 중 오류: {str(e)}")
+            return None
+
+    def _create_yearly_pivot_table(self, wb, source_sheet_name: str, ws_pivot) -> object:
+        '''연도별 예산 비교용 피벗 테이블을 생성합니다.'''
+        try:
+            import xlwings as xw
+
+            # 연도별 데이터 시트를 소스로 사용
+            ws_source = wb.sheets[source_sheet_name]
+            
+            # 데이터 범위 확인 (A:연도, B:예산과목, C:예산금액)
+            try:
+                used_range = ws_source.api.UsedRange
+                last_row = used_range.Row + used_range.Rows.Count - 1
+                source_range = ws_source.range(f'A1:C{last_row}')
+                logging.info(f"연도별 데이터 범위: {source_range.address}")
+            except:
+                # 수동으로 범위 찾기
+                last_row = 1
+                for row in range(1, 1000):  # 최대 1000행까지 확인
+                    if ws_source.range(f'A{row}').value is not None:
+                        last_row = row
+                source_range = ws_source.range(f'A1:C{last_row}')
+                logging.info(f"수동 범위 설정: {source_range.address}")
+
+            logging.info(f"소스 데이터 범위: {source_range.address}")
+
+            # 1. 피벗 캐시 생성
+            pivot_cache = wb.api.PivotCaches().Create(
+                SourceType=xw.constants.PivotTableSourceType.xlDatabase,
+                SourceData=source_range.api
+            )
+
+            # 2. 피벗 테이블 생성
+            logging.info("연도별 피벗 테이블 생성 중...")
+            pivot_table = pivot_cache.CreatePivotTable(
+                TableDestination=ws_pivot.range('B5').api,
+                TableName='YearlyBudgetComparison'
+            )
+            logging.info("연도별 피벗 테이블 기본 구조 생성 완료")
+
+            # 3. 필드 배치
+            logging.info("필드 배치 시작...")
+            
+            # 행 필드: 예산과목
+            logging.info("예산과목 필드를 행 필드로 설정 중...")
+            pivot_table.PivotFields('예산과목').Orientation = xw.constants.PivotFieldOrientation.xlRowField
+            logging.info("예산과목 행 필드 설정 완료")
+
+            # 열 필드: 연도
+            logging.info("연도 필드를 열 필드로 설정 중...")
+            pivot_table.PivotFields('연도').Orientation = xw.constants.PivotFieldOrientation.xlColumnField
+            logging.info("연도 열 필드 설정 완료")
+
+            # 값 필드: 예산금액
+            logging.info("예산금액 필드를 데이터 필드로 설정 중...")
+            try:
+                # 사용 가능한 필드 확인
+                available_fields = [field.Name for field in pivot_table.PivotFields()]
+                logging.info(f"피벗 테이블 사용 가능한 필드들: {available_fields}")
+                
+                # 예산금액 필드 추가
+                budget_field = pivot_table.PivotFields('예산금액')
+                data_field = pivot_table.AddDataField(
+                    budget_field,
+                    '예산금액 합계',
+                    xw.constants.ConsolidationFunction.xlSum
+                )
+                logging.info("예산금액 데이터 필드 추가 완료")
+                
+                # 총합계 행과 열 제거
+                logging.info("총합계 행과 열 제거 중...")
+                try:
+                    # 행 총합계 제거
+                    pivot_table.RowGrand = False
+                    logging.info("행 총합계 제거 완료")
+                    
+                    # 열 총합계 제거
+                    pivot_table.ColumnGrand = False
+                    logging.info("열 총합계 제거 완료")
+                except Exception as grand_error:
+                    logging.warning(f"총합계 제거 실패: {grand_error}")
+                
+            except Exception as field_error:
+                logging.error(f"필드 설정 중 오류: {field_error}")
+                return None
+
+            # 피벗 테이블 스타일 설정
+            try:
+                pivot_table.TableStyle2 = 'PivotStyleMedium9'
+                logging.info("피벗 테이블 스타일 적용 완료")
+            except Exception as style_error:
+                logging.warning(f"피벗 테이블 스타일 적용 실패: {style_error}")
+
+            logging.info("연도별 예산 비교 피벗 테이블 생성 완료")
+            return pivot_table
+
+        except Exception as e:
+            logging.error(f"연도별 피벗 테이블 생성 중 오류: {str(e)}")
+            return None
+
+    def _add_yearly_comparison_chart(self, ws_pivot, pivot_table):
+        '''연도별 예산 비교 차트를 추가합니다.'''
+        try:
+            import xlwings as xw
+
+            # 피벗 차트 생성 (세로 막대형)
+            chart_shape = ws_pivot.api.Shapes.AddChart2(
+                227,  # 차트 스타일
+                xw.constants.ChartType.xlColumnClustered
+            )
+            
+            chart = chart_shape.Chart
+            
+            # 피벗 테이블 범위를 차트 소스로 설정
+            # 피벗 테이블이 B5부터 시작하므로 해당 범위를 expand하여 사용
+            source_range = ws_pivot.range('B5').expand()
+            chart.SetSourceData(Source=source_range.api)
+            
+            # 차트 제목 설정
+            chart.HasTitle = True
+            chart.ChartTitle.Text = '연도별 예산과목별 예산금액 비교'
+            
+            # 축 제목 설정
+            try:
+                chart.Axes(1).HasTitle = True  # X축
+                chart.Axes(1).AxisTitle.Text = '예산과목'
+                
+                chart.Axes(2).HasTitle = True  # Y축
+                chart.Axes(2).AxisTitle.Text = '예산금액 (원)'
+            except Exception as axis_error:
+                logging.warning(f"축 제목 설정 실패: {axis_error}")
+            
+            # 차트 위치 조정
+            chart_shape.Left = 500
+            chart_shape.Top = 50
+            chart_shape.Width = 500
+            chart_shape.Height = 350
+            
+            logging.info("연도별 예산 비교 차트 추가 완료")
+
+        except Exception as e:
+            logging.error(f"연도별 비교 차트 추가 중 오류: {str(e)}")
+
+    def _add_yearly_slicers(self, wb, pivot_table, ws_pivot):
+        '''연도별 비교용 슬라이서를 추가합니다.'''
+        try:
+            import xlwings as xw
+
+            # 예산과목 슬라이서 추가
+            try:
+                slicer_cache_budget = wb.api.SlicerCaches.Add2(
+                    pivot_table,
+                    '예산과목'
+                )
+                
+                slicer_cache_budget.Slicers.Add(
+                    SlicerDestination=ws_pivot.api,
+                    Name='YearlyBudgetItemSlicer',
+                    Caption='예산과목 선택',
+                    Top=50,
+                    Left=1050,
+                    Width=200,
+                    Height=400
+                )
+                logging.info("예산과목 슬라이서 추가 완료")
+            except Exception as e:
+                logging.warning(f"예산과목 슬라이서 추가 실패: {str(e)}")
+
+            # 연도 슬라이서 추가
+            try:
+                slicer_cache_year = wb.api.SlicerCaches.Add2(
+                    pivot_table,
+                    '연도'
+                )
+                
+                slicer_cache_year.Slicers.Add(
+                    SlicerDestination=ws_pivot.api,
+                    Name='YearSlicer',
+                    Caption='연도 선택',
+                    Top=470,
+                    Left=1050,
+                    Width=200,
+                    Height=150
+                )
+                logging.info("연도 슬라이서 추가 완료")
+            except Exception as e:
+                logging.warning(f"연도 슬라이서 추가 실패: {str(e)}")
+
+        except Exception as e:
+            logging.error(f"연도별 슬라이서 추가 중 오류: {str(e)}")
+
+    def reorder_all_sheets(self, file_path: str) -> bool:
+        '''모든 시트를 원하는 순서로 재배치합니다.'''
+        if not self.xlwings_available:
+            logging.info("xlwings를 사용할 수 없어 시트 순서 조정을 건너뜁니다.")
+            return False
+
+        try:
+            import xlwings as xw
+
+            logging.info("전체 시트 순서 조정 시작")
+
+            with xw.App(visible=True, add_book=False) as app:
+                wb = app.books.open(file_path)
+
+                # 원하는 시트 순서 정의
+                desired_order = [
+                    '대시보드',
+                    '총액',
+                    '사업비',
+                    '연구비',
+                    '집행관리(사업비)',
+                    '집행관리(연구비)',
+                    '연도별예산비교',
+                    '예산분석',
+                    '연도별예산데이터',
+                    '예산분석데이터'
+                ]
+
+                # 현재 시트 목록 확인
+                current_sheets = [sheet.name for sheet in wb.sheets]
+                logging.info(f"현재 시트 순서: {current_sheets}")
+
+                # 원하는 순서대로 시트 이동
+                for target_index, sheet_name in enumerate(desired_order):
+                    if sheet_name in current_sheets:
+                        # 시트 찾기
+                        sheet = wb.sheets[sheet_name]
+                        
+                        # 시트를 원하는 위치로 이동 (xlwings에서는 before 파라미터 사용)
+                        if target_index == 0:
+                            # 첫 번째 위치로 이동
+                            sheet.api.Move(Before=wb.sheets[0].api)
+                        else:
+                            # 특정 위치 다음으로 이동
+                            previous_sheet_name = desired_order[target_index - 1]
+                            if previous_sheet_name in current_sheets:
+                                previous_sheet = wb.sheets[previous_sheet_name]
+                                sheet.api.Move(After=previous_sheet.api)
+                        
+                        logging.debug(f"시트 '{sheet_name}' 위치 조정 완료")
+                    else:
+                        logging.debug(f"시트 '{sheet_name}'를 찾을 수 없습니다.")
+
+                # 최종 시트 순서 확인
+                final_sheets = [sheet.name for sheet in wb.sheets]
+                logging.info(f"최종 시트 순서: {final_sheets}")
+
+                wb.save()
+                logging.info("시트 순서 조정 완료")
+                return True
+
+        except Exception as e:
+            logging.error(f"전체 시트 순서 조정 중 오류: {str(e)}")
+            return False

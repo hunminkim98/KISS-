@@ -143,7 +143,7 @@ BUDGET_CLASSIFICATION = {
 }
 
 
-    # 기본 예산금액 설정
+# 기본 예산금액 설정
 BUDGET2025 = {
     '2025_budget_amounts': {
         '일용임금': 1256007740,
@@ -166,7 +166,8 @@ BUDGET2025 = {
         '국내여비': 220000000,
         '국외업무여비': 36000000,
         '사업추진비': 29400000,
-        '회의비': 0
+        '회의비': 0,
+        '연구개발비': 90000000
     }
 }
 
@@ -175,24 +176,26 @@ BUDGET2024 = {
         '일용임금': 689170381,
         '일용직 고용부담금': 11757858,
         '지급수수료': 70705927,
-        '도서인쇄비': 33032440,
-        '소모품비': 14239394,
+        '도서인쇄비': 2828080,
+        '소모품비': 9722100,
         '홍보비': 2998250,
         '제세공과금': 3313080,
         '통신비': 194150,
         '보험료': 0,
         '피복비': 15600000,
         '임차료': 122480003,
-        '유류비': 4617346,
-        '시설장비유지비': 205000,
-        '급여성복리후생비(일용직)': 2828080,
+        '유류비': 205000,
+        '시설장비유지비': 0,
+        '급여성복리후생비(일용직)': 6168154,
         '일용직 비급여성비용': 9982100,
         '행사비': 27653000,
-        '일반용역비': 88498760,
-        '국내여비': 87572962,
-        '국외업무여비': 6168154,
-        '사업추진비': 9722100,
-        '회의비': 12898420
+        '일반용역비': 4617346,
+        '국내여비': 94145553,
+        '국외업무여비': 87572962,
+        '사업추진비': 33032440,
+        '회의비': 12898420,
+        '연구개발비': 14239394,
+        '자산취득비': 122480003
     }
 }
 
@@ -203,7 +206,7 @@ BUDGET2023 = {
         '지급수수료': 83413923,
         '도서인쇄비': 48650071,
         '소모품비': 14501530,
-        '홍보비': 109920000,
+        '홍보비': 10992000,
         '제세공과금': 3188963,
         '통신비': 330000,
         '보험료': 0,
@@ -218,7 +221,9 @@ BUDGET2023 = {
         '국내여비': 78758700,
         '국외업무여비': 23350489,
         '사업추진비': 9526058,
-        '회의비': 14662950
+        '회의비': 14662950,
+        '연구개발비': 230150000,
+        '자산취득비': 9990000
     }
 }
 
@@ -244,12 +249,69 @@ BUDGET2022 = {
         '국내여비': 56850424,
         '국외업무여비': 5377178,
         '사업추진비': 13198367,
-        '회의비': 17803560
+        '회의비': 17803560,
+        '연구개발비': 220163220,
+        '재료비': 18295327
     }
 }
 
 # BUDGET_CLASSIFICATION의 2025_budget_amounts 업데이트
 BUDGET_CLASSIFICATION['2025_budget_amounts'] = BUDGET2025['2025_budget_amounts']
+
+# 연도별 예산 데이터 통합 딕셔너리
+YEARLY_BUDGET_DATA = {
+    '2022': BUDGET2022['2022_budget_amounts'],
+    '2023': BUDGET2023['2023_budget_amounts'],
+    '2024': BUDGET2024['2024_budget_amounts'],
+    '2025': BUDGET2025['2025_budget_amounts']
+}
+
+def create_yearly_pivot_data():
+    """
+    연도별 예산 데이터를 피벗 테이블용 세로형 데이터로 변환합니다.
+    
+    Returns:
+        list: [{'연도': year, '예산과목': item, '예산금액': amount}, ...] 형태의 데이터
+    """
+    pivot_data = []
+    
+    for year, budget_data in YEARLY_BUDGET_DATA.items():
+        for budget_item, amount in budget_data.items():
+            pivot_data.append({
+                '연도': year,
+                '예산과목': budget_item,
+                '예산금액': amount
+            })
+    
+    return pivot_data
+
+def get_all_budget_items():
+    """
+    모든 연도의 예산과목을 통합한 리스트를 반환합니다.
+    
+    Returns:
+        list: 모든 예산과목의 고유 리스트 (정렬됨)
+    """
+    all_items = set()
+    
+    for budget_data in YEARLY_BUDGET_DATA.values():
+        all_items.update(budget_data.keys())
+    
+    return sorted(list(all_items))
+
+def get_yearly_budget_summary():
+    """
+    연도별 예산 총액 요약을 반환합니다.
+    
+    Returns:
+        dict: {year: total_amount} 형태의 연도별 총 예산
+    """
+    summary = {}
+    
+    for year, budget_data in YEARLY_BUDGET_DATA.items():
+        summary[year] = sum(budget_data.values())
+    
+    return summary
 
 # 사업비 요약 시트 컬럼 설정
 SUMMARY_SHEET_COLUMNS = [
@@ -276,7 +338,7 @@ TOTAL_SHEET_COLUMNS = [
 
 # xlwings 대화형 피벗 테이블 설정
 ENABLE_INTERACTIVE_PIVOT = True  # 대화형 피벗 테이블 활성화 여부
-PIVOT_SHEET_NAME = '예산분석(피벗)'
+PIVOT_SHEET_NAME = '예산분석'
 PIVOT_CHART_TITLE = '예산 분석 차트'
 
 # 피벗 테이블 구조 설정
