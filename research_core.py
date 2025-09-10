@@ -2183,6 +2183,7 @@ class DashboardGenerator:
             start_date = date(2025, 3, 1)
             end_date = date(2026, 2, 28)
             current_date = datetime.now().date()
+            # print(f"Current date: {current_date}, Start date: {start_date}, End date: {end_date}")
             
             if current_date < start_date:
                 progress_rate = 0
@@ -2190,8 +2191,11 @@ class DashboardGenerator:
                 progress_rate = 100
             else:
                 total_days = (end_date - start_date).days
+                # print(f"Total days in project: {total_days}")
                 elapsed_days = (current_date - start_date).days
+                # print(f"Elapsed days since start: {elapsed_days}")
                 progress_rate = (elapsed_days / total_days) * 100
+                # print(f"Calculated progress rate: {progress_rate:.2f}%")
 
             worksheet['G5'] = f'"{progress_rate:.1f}%"'
             worksheet['G5'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['warning_orange'])
@@ -2354,9 +2358,17 @@ class DashboardGenerator:
     def _create_budget_item_indicators_section(self, worksheet, total_sheet_data: pd.DataFrame):
         '''대시보드에 예산과목별 지표 섹션을 생성합니다. (B25에 추가)'''
         try:
-            from openpyxl.styles import Font, Alignment, PatternFill
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
             logging.info("대시보드 예산과목별 지표 섹션 생성 시작")
+
+            # 검정색 테두리 스타일 정의
+            dark_border = Border(
+                left=Side(style='thin', color='000000'),    # 검정색
+                right=Side(style='thin', color='000000'),
+                top=Side(style='thin', color='000000'),
+                bottom=Side(style='thin', color='000000')
+            )
 
             # B25에 섹션 제목 추가 (대시보드 스타일에 맞춰) - 위치 조정
             worksheet['B25'] = "예산과목별 지표"
@@ -2367,84 +2379,142 @@ class DashboardGenerator:
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
 
-            # B26~E26에 헤더 추가 - 위치 조정
-            headers = ['예산과목', '집행률(%)', '예산금액', '예산잔액']
-            header_cells = ['B26', 'C26', 'D26', 'E26']
+            # B26~H26에 헤더 추가 - 개선된 7개 컬럼 구조
+            headers = ['예산목', '세목', '예산과목', '예산금액', '지출액', '예산잔액', '집행률(%)']
+            header_cells = ['B26', 'C26', 'D26', 'E26', 'F26', 'G26', 'H26']
 
             for header, cell_ref in zip(headers, header_cells):
                 cell = worksheet[cell_ref]
                 cell.value = header
                 cell.font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
-                cell.alignment = Alignment(horizontal='left', vertical='center')
+                cell.alignment = Alignment(horizontal='center', vertical='center')  # 헤더 가운데 정렬
+                cell.border = dark_border  # 검정색 테두리 적용
                 # 헤더 배경은 차트 섹션과 동일한 반투명 회색으로 설정
                 cell.fill = chart_fill
 
-            # 예산과목별 데이터 추출 (총액 행 제외)
+            # 예산과목별 데이터 추출 (총액 행 제외) - 개선된 7개 컬럼 구조
             budget_items_data = []
             for _, row in total_sheet_data.iterrows():
                 if (row['예산과목'] and row['예산과목'] != '' and
                     row['예산목'] != '총액' and not pd.isna(row['예산과목'])):
                     budget_items_data.append({
+                        '예산목': row['예산목'],
+                        '세목': row['세목'],
                         '예산과목': row['예산과목'],
                         '예산금액': row['예산금액'],
+                        '지출액': row['센터'] + row['심층연구'],  # 센터 + 심층연구 = 지출액
                         '예산잔액': row['예산잔액'],
                         '집행률': row['집행률']
                     })
 
-            # 데이터 행 추가 (B27부터 시작) - 위치 조정
+            # 데이터 행 추가 (B27부터 시작) - 개선된 7개 컬럼 구조
             start_row = 27
+
+            # 예산목과 세목 중복 처리를 위한 변수
+            previous_budget_category = None
+            previous_subcategory = None
 
             for i, item in enumerate(budget_items_data):
                 row_num = start_row + i
 
-                # 예산과목 (B열)
-                budget_cell = worksheet[f'B{row_num}']
-                budget_cell.value = item['예산과목']
-                budget_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
-                budget_cell.alignment = Alignment(horizontal='left', vertical='center')
-                budget_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
-
-                # 집행률 (C열) - 총액 시트 참조
-                execution_cell = worksheet[f'C{row_num}']
-                original_row = self._find_budget_item_row_in_total_sheet(total_sheet_data, item['예산과목'])
-                if original_row:
-                    execution_cell.value = f'=총액!H{original_row}'  # 총액 시트의 H열(집행률) 참조
+                # 예산목 (B열) - 중복 시 빈 값으로 설정 (병합 전 준비)
+                budget_category_cell = worksheet[f'B{row_num}']
+                current_budget_category = item['예산목']
+                if current_budget_category != previous_budget_category:
+                    budget_category_cell.value = current_budget_category
+                    previous_budget_category = current_budget_category
                 else:
-                    execution_cell.value = f"{item['집행률']}"
-                execution_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
-                execution_cell.alignment = Alignment(horizontal='right', vertical='center')
-                execution_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+                    budget_category_cell.value = ""  # 중복된 경우 빈 값
+                budget_category_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                budget_category_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                budget_category_cell.border = dark_border  # 검정색 테두리 적용
+                budget_category_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
 
-                # 예산금액 (D열) - 총액 시트 참조
-                budget_amount_cell = worksheet[f'D{row_num}']
+                # 세목 (C열) - 중복 시 빈 값으로 설정 (병합 전 준비)
+                subcategory_cell = worksheet[f'C{row_num}']
+                current_subcategory = item['세목']
+                if current_subcategory != previous_subcategory:
+                    subcategory_cell.value = current_subcategory
+                    previous_subcategory = current_subcategory
+                else:
+                    subcategory_cell.value = ""  # 중복된 경우 빈 값
+                subcategory_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                subcategory_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                subcategory_cell.border = dark_border  # 검정색 테두리 적용
+                subcategory_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+
+                # 예산과목 (D열)
+                budget_item_cell = worksheet[f'D{row_num}']
+                budget_item_cell.value = item['예산과목']
+                budget_item_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                budget_item_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                budget_item_cell.border = dark_border  # 검정색 테두리 적용
+                budget_item_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+
+                # 예산금액 (E열) - 총액 시트 참조
+                budget_amount_cell = worksheet[f'E{row_num}']
+                original_row = self._find_budget_item_row_in_total_sheet(total_sheet_data, item['예산과목'])
                 if original_row:
                     budget_amount_cell.value = f'=총액!D{original_row}'  # 총액 시트의 D열(예산금액) 참조
                 else:
                     budget_amount_cell.value = item['예산금액']
                 budget_amount_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
-                budget_amount_cell.alignment = Alignment(horizontal='right', vertical='center')
+                budget_amount_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
                 budget_amount_cell.number_format = '#,##0'
+                budget_amount_cell.border = dark_border  # 검정색 테두리 적용
                 budget_amount_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
 
-                # 예산잔액 (E열) - 총액 시트 참조
-                remaining_cell = worksheet[f'E{row_num}']
+                # 지출액 (F열) - 총액 시트의 센터+심층연구 참조
+                expense_cell = worksheet[f'F{row_num}']
+                if original_row:
+                    expense_cell.value = f'=총액!E{original_row}+총액!F{original_row}'  # 총액 시트의 E열(센터)+F열(심층연구) 참조
+                else:
+                    expense_cell.value = item['지출액']
+                expense_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                expense_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                expense_cell.number_format = '#,##0'
+                expense_cell.border = dark_border  # 검정색 테두리 적용
+                expense_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+
+                # 예산잔액 (G열) - 총액 시트 참조
+                remaining_cell = worksheet[f'G{row_num}']
                 if original_row:
                     remaining_cell.value = f'=총액!G{original_row}'  # 총액 시트의 G열(예산잔액) 참조
                 else:
                     remaining_cell.value = item['예산잔액']
                 remaining_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
-                remaining_cell.alignment = Alignment(horizontal='right', vertical='center')
+                remaining_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
                 remaining_cell.number_format = '#,##0'
+                remaining_cell.border = dark_border  # 검정색 테두리 적용
                 remaining_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
 
-            # 컬럼 너비 조정 (대시보드에 맞게)
-            worksheet.column_dimensions['B'].width = 25  # 예산과목 (KPI 카드와 통일)
-            worksheet.column_dimensions['C'].width = 12  # 집행률
-            worksheet.column_dimensions['D'].width = 25  # 예산금액 (KPI 카드와 통일)
-            worksheet.column_dimensions['E'].width = 15  # 예산잔액
-            worksheet.column_dimensions['F'].width = 25  # KPI 카드와 통일
-            worksheet.column_dimensions['H'].width = 25  # KPI 카드와 통일
-            worksheet.column_dimensions['J'].width = 25  # KPI 카드와 통일
+                # 집행률 (H열) - 총액 시트 참조
+                execution_cell = worksheet[f'H{row_num}']
+                if original_row:
+                    execution_cell.value = f'=총액!H{original_row}'  # 총액 시트의 H열(집행률) 참조
+                else:
+                    execution_cell.value = f"{item['집행률']}"
+                execution_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                execution_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                execution_cell.border = dark_border  # 검정색 테두리 적용
+                execution_cell.fill = chart_fill  # 차트 섹션과 동일한 배경
+
+            # 컬럼 너비 조정 (개선된 7개 컬럼 대시보드에 맞게)
+            worksheet.column_dimensions['B'].width = 20  # 예산목
+            worksheet.column_dimensions['C'].width = 20  # 세목
+            worksheet.column_dimensions['D'].width = 20  # 예산과목 (KPI 카드와 통일)
+            worksheet.column_dimensions['E'].width = 20  # 예산금액
+            worksheet.column_dimensions['F'].width = 20  # 지출액
+            worksheet.column_dimensions['G'].width = 20  # 예산잔액
+            worksheet.column_dimensions['H'].width = 20  # 집행률
+            worksheet.column_dimensions['I'].width = 20  # KPI 카드와 통일 (여백)
+            worksheet.column_dimensions['J'].width = 23  # KPI 카드와 통일
+
+            # 예산목 컬럼 병합 처리 (중복 제거)
+            self._merge_budget_category_cells(worksheet, budget_items_data, start_row, chart_fill)
+
+            # 세목 컬럼 병합 처리 (중복 제거)
+            self._merge_subcategory_cells(worksheet, budget_items_data, start_row, chart_fill)
 
             # 예산과목별 지표 그래프 추가 (테이블 옆에) - 제거됨
             # self._create_budget_item_charts(worksheet, len(budget_items_data))
@@ -2453,6 +2523,122 @@ class DashboardGenerator:
 
         except Exception as e:
             logging.error(f"대시보드 예산과목별 지표 섹션 생성 중 오류: {str(e)}")
+
+    def _merge_budget_category_cells(self, worksheet, budget_items_data: list, start_row: int, chart_fill):
+        '''예산목 컬럼에서 중복되는 값들을 병합합니다.'''
+        try:
+            from openpyxl.styles import Font, Alignment, Border, Side
+
+            logging.info("예산목 컬럼 병합 처리 시작")
+
+            # 어두운 회색 테두리 스타일 정의
+            dark_border = Border(
+                left=Side(style='thin', color='404040'),
+                right=Side(style='thin', color='404040'),
+                top=Side(style='thin', color='404040'),
+                bottom=Side(style='thin', color='404040')
+            )
+
+            # 예산목별 범위 계산
+            merge_ranges = {}
+            current_budget_category = None
+            range_start = None
+
+            for i, item in enumerate(budget_items_data):
+                row_num = start_row + i
+                budget_category = item['예산목']
+
+                if budget_category != current_budget_category:
+                    # 이전 범위 저장
+                    if current_budget_category and range_start is not None:
+                        merge_ranges[current_budget_category] = (range_start, row_num - 1)
+
+                    # 새 범위 시작
+                    current_budget_category = budget_category
+                    range_start = row_num
+
+            # 마지막 범위 저장
+            if current_budget_category and range_start is not None:
+                merge_ranges[current_budget_category] = (range_start, start_row + len(budget_items_data) - 1)
+
+            # 병합 적용 (2개 이상의 행이 있는 경우에만)
+            for budget_category, (start, end) in merge_ranges.items():
+                if end > start:  # 2개 이상의 행이 있는 경우
+                    merge_range = f'B{start}:B{end}'
+                    worksheet.merge_cells(merge_range)
+                    
+                    # 병합된 셀에 텍스트와 스타일 적용
+                    merged_cell = worksheet[f'B{start}']
+                    merged_cell.value = budget_category
+                    merged_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                    merged_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                    merged_cell.border = dark_border  # 어두운 회색 테두리 적용
+                    merged_cell.fill = chart_fill
+
+                    logging.info(f"예산목 '{budget_category}' 병합 완료: {merge_range}")
+
+            logging.info("예산목 컬럼 병합 처리 완료")
+
+        except Exception as e:
+            logging.error(f"예산목 컬럼 병합 중 오류: {str(e)}")
+
+    def _merge_subcategory_cells(self, worksheet, budget_items_data: list, start_row: int, chart_fill):
+        '''세목 컬럼에서 중복되는 값들을 병합합니다.'''
+        try:
+            from openpyxl.styles import Font, Alignment, Border, Side
+
+            logging.info("세목 컬럼 병합 처리 시작")
+
+            # 어두운 회색 테두리 스타일 정의
+            dark_border = Border(
+                left=Side(style='thin', color='404040'),
+                right=Side(style='thin', color='404040'),
+                top=Side(style='thin', color='404040'),
+                bottom=Side(style='thin', color='404040')
+            )
+
+            # 세목별 범위 계산
+            merge_ranges = {}
+            current_subcategory = None
+            range_start = None
+
+            for i, item in enumerate(budget_items_data):
+                row_num = start_row + i
+                subcategory = item['세목']
+
+                if subcategory != current_subcategory:
+                    # 이전 범위 저장
+                    if current_subcategory and range_start is not None:
+                        merge_ranges[current_subcategory] = (range_start, row_num - 1)
+
+                    # 새 범위 시작
+                    current_subcategory = subcategory
+                    range_start = row_num
+
+            # 마지막 범위 저장
+            if current_subcategory and range_start is not None:
+                merge_ranges[current_subcategory] = (range_start, start_row + len(budget_items_data) - 1)
+
+            # 병합 적용 (2개 이상의 행이 있는 경우에만)
+            for subcategory, (start, end) in merge_ranges.items():
+                if end > start:  # 2개 이상의 행이 있는 경우
+                    merge_range = f'C{start}:C{end}'
+                    worksheet.merge_cells(merge_range)
+                    
+                    # 병합된 셀에 텍스트와 스타일 적용
+                    merged_cell = worksheet[f'C{start}']
+                    merged_cell.value = subcategory
+                    merged_cell.font = Font(name='맑은 고딕', size=10, color=self.color_palette['white_text'])
+                    merged_cell.alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                    merged_cell.border = dark_border  # 어두운 회색 테두리 적용
+                    merged_cell.fill = chart_fill
+
+                    logging.info(f"세목 '{subcategory}' 병합 완료: {merge_range}")
+
+            logging.info("세목 컬럼 병합 처리 완료")
+
+        except Exception as e:
+            logging.error(f"세목 컬럼 병합 중 오류: {str(e)}")
 
     def _create_budget_item_charts(self, worksheet, data_count: int):
         '''예산과목별 지표 테이블 옆에 막대그래프를 생성합니다.'''
@@ -2469,9 +2655,9 @@ class DashboardGenerator:
             budget_chart.y_axis.title = None  # Y축 제목 제거
             budget_chart.x_axis.title = None  # X축 제목 제거
 
-            # 예산잔액 데이터 참조 (D열)
-            budget_data = Reference(worksheet, min_col=4, min_row=23, max_row=22+data_count, max_col=4)
-            budget_categories = Reference(worksheet, min_col=2, min_row=23, max_row=22+data_count, max_col=2)
+            # 예산잔액 데이터 참조 (G열) - 개선된 컬럼 구조에 맞게 업데이트
+            budget_data = Reference(worksheet, min_col=7, min_row=26, max_row=26+data_count, max_col=7)  # G열: 예산잔액
+            budget_categories = Reference(worksheet, min_col=4, min_row=27, max_row=26+data_count, max_col=4)  # D열: 예산과목
 
             budget_chart.add_data(budget_data, titles_from_data=False)
             budget_chart.set_categories(budget_categories)
@@ -2503,8 +2689,8 @@ class DashboardGenerator:
             except Exception as label_e:
                 logging.warning(f"예산잔액 차트 데이터 레이블 적용 실패: {str(label_e)}")
 
-            # 차트를 워크시트에 추가
-            worksheet.add_chart(budget_chart, "E22")
+            # 차트를 워크시트에 추가 (위치 조정 - 새로운 테이블 너비에 맞게)
+            worksheet.add_chart(budget_chart, "I26")
 
             # 2. 집행률 막대그래프 (E32:I40)
             execution_chart = BarChart()
@@ -2514,9 +2700,9 @@ class DashboardGenerator:
             execution_chart.y_axis.title = None  # Y축 제목 제거
             execution_chart.x_axis.title = None  # X축 제목 제거
 
-            # 집행률 데이터 참조 (C열)
-            execution_data = Reference(worksheet, min_col=3, min_row=23, max_row=22+data_count, max_col=3)
-            execution_categories = Reference(worksheet, min_col=2, min_row=23, max_row=22+data_count, max_col=2)
+            # 집행률 데이터 참조 (H열) - 개선된 컬럼 구조에 맞게 업데이트
+            execution_data = Reference(worksheet, min_col=8, min_row=26, max_row=26+data_count, max_col=8)  # H열: 집행률
+            execution_categories = Reference(worksheet, min_col=4, min_row=27, max_row=26+data_count, max_col=4)  # D열: 예산과목
 
             execution_chart.add_data(execution_data, titles_from_data=False)
             execution_chart.set_categories(execution_categories)
@@ -2548,8 +2734,8 @@ class DashboardGenerator:
             except Exception as label_e:
                 logging.warning(f"집행률 차트 데이터 레이블 적용 실패: {str(label_e)}")
 
-            # 차트를 워크시트에 추가
-            worksheet.add_chart(execution_chart, "E33")
+            # 차트를 워크시트에 추가 (위치 조정 - 새로운 테이블 너비에 맞게)
+            worksheet.add_chart(execution_chart, "I35")
 
             logging.info("예산과목별 지표 그래프 생성 완료")
 
@@ -2571,13 +2757,19 @@ class DashboardGenerator:
         '''현대적 스타일의 집행률 비교 차트를 생성합니다. (총액 시트 참조)'''
         try:
             from openpyxl.chart import BarChart, Reference
-            from openpyxl.styles import Font, PatternFill
+            from openpyxl.styles import Font, PatternFill, Border, Side
 
             # 차트 데이터 준비 (반투명 회색 배경으로 고급스러움 추가)
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
-
-            # 집행률 차트 제목 추가 (D13에 차트 제목) - 위치 조정
+            
+            # 테두리 스타일 정의 (검정색)
+            dark_border = Border(
+                left=Side(style='thin', color='000000'),
+                right=Side(style='thin', color='000000'),
+                top=Side(style='thin', color='000000'),
+                bottom=Side(style='thin', color='000000')
+            )            # 집행률 차트 제목 추가 (D13에 차트 제목) - 위치 조정
             worksheet['D13'] = "집행률 비교"
             worksheet['D13'].font = Font(name='맑은 고딕', size=16, bold=True, color=self.color_palette['silver_accent'])
 
@@ -2586,8 +2778,12 @@ class DashboardGenerator:
             worksheet['C14'] = "집행률(%)"
             worksheet['B14'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
             worksheet['C14'].font = Font(name='맑은 고딕', size=12, bold=False, color=self.color_palette['white_text'])
+            worksheet['B14'].alignment = Alignment(horizontal='center', vertical='center')  # 헤더 가운데 정렬
+            worksheet['C14'].alignment = Alignment(horizontal='center', vertical='center')  # 헤더 가운데 정렬
             worksheet['B14'].fill = chart_fill
             worksheet['C14'].fill = chart_fill
+            worksheet['B14'].border = dark_border  # 검정색 테두리 적용
+            worksheet['C14'].border = dark_border  # 검정색 테두리 적용
 
             # 총액 시트 참조 수식으로 데이터 설정 (위치 조정)
             if excel_refs['total_row_index'] is not None:
@@ -2614,8 +2810,12 @@ class DashboardGenerator:
             for row in range(15, 18):
                 worksheet[f'B{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'C{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
+                worksheet[f'B{row}'].alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
                 worksheet[f'B{row}'].fill = chart_fill
                 worksheet[f'C{row}'].fill = chart_fill
+                worksheet[f'B{row}'].border = dark_border  # 검정색 테두리 적용
+                worksheet[f'C{row}'].border = dark_border  # 검정색 테두리 적용
 
             # 막대 차트 생성 (제목과 축 이름 제거) # TODO: y축이 100 (100%)인 곳에 빨간색 선 추가
             chart = BarChart()
@@ -2703,11 +2903,19 @@ class DashboardGenerator:
         '''현대적 스타일의 예산 vs 집행 현황 차트를 생성합니다. (총액 시트 참조)'''
         try:
             from openpyxl.chart import PieChart, Reference
-            from openpyxl.styles import Font, PatternFill
+            from openpyxl.styles import Font, PatternFill, Border, Side
 
             # 차트 데이터 준비 (반투명 회색 배경으로 고급스러움 추가)
             chart_fill = PatternFill(start_color=self.color_palette['translucent_gray'],
                                    end_color=self.color_palette['translucent_gray'], fill_type='solid')
+            
+            # 테두리 스타일 정의 (검정색)
+            dark_border = Border(
+                left=Side(style='thin', color='000000'),
+                right=Side(style='thin', color='000000'),
+                top=Side(style='thin', color='000000'),
+                bottom=Side(style='thin', color='000000')
+            )
 
             # 예산 배분 차트 제목 추가 (H13에 차트 제목) - 위치 조정
             worksheet['H13'] = "예산 배분 현황"
@@ -2718,8 +2926,12 @@ class DashboardGenerator:
             worksheet['C20'] = "금액"
             worksheet['B20'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
             worksheet['C20'].font = Font(name='맑은 고딕', size=12, bold=True, color=self.color_palette['white_text'])
+            worksheet['B20'].alignment = Alignment(horizontal='center', vertical='center')  # 헤더 가운데 정렬
+            worksheet['C20'].alignment = Alignment(horizontal='center', vertical='center')  # 헤더 가운데 정렬
             worksheet['B20'].fill = chart_fill
             worksheet['C20'].fill = chart_fill
+            worksheet['B20'].border = dark_border  # 검정색 테두리 적용
+            worksheet['C20'].border = dark_border  # 검정색 테두리 적용
 
             # 총액 시트 참조 수식으로 데이터 설정 (B21부터 시작) - 위치 조정, 천 단위 구분자 적용
             if excel_refs['total_row_index'] is not None:
@@ -2746,8 +2958,12 @@ class DashboardGenerator:
             for row in range(20, 24):
                 worksheet[f'B{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
                 worksheet[f'C{row}'].font = Font(name='맑은 고딕', size=11, color=self.color_palette['white_text'])
+                worksheet[f'B{row}'].alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
+                worksheet[f'C{row}'].alignment = Alignment(horizontal='center', vertical='center')  # 가운데 정렬
                 worksheet[f'B{row}'].fill = chart_fill
                 worksheet[f'C{row}'].fill = chart_fill
+                worksheet[f'B{row}'].border = dark_border  # 검정색 테두리 적용
+                worksheet[f'C{row}'].border = dark_border  # 검정색 테두리 적용
                 # 금액 컬럼에 천 단위 구분자 적용
                 if row >= 21:  # 데이터 행에만 적용 (헤더 제외)
                     worksheet[f'C{row}'].number_format = '#,##0'
