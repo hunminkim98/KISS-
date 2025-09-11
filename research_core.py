@@ -2863,32 +2863,6 @@ class DashboardGenerator:
             chart.dataLabels.position = "ctr"
             chart.dataLabels.font = Font(name='맑은 고딕', size=13)
 
-            # BUG: 차트 배경 색상 적용 안됨.
-            # 차트 배경색 설정 (대시보드와 조화로운 어두운 회색)
-            try:
-                from openpyxl.drawing.fill import SolidColorFillProperties
-                from openpyxl.drawing.colors import RgbColor
-
-                # 차트 배경색 설정
-                chart_bg_color = self.color_palette['translucent_gray']  # 반투명 회색
-
-                # SolidColorFillProperties 올바른 사용법
-                solid_fill = SolidColorFillProperties()
-                solid_fill.srgbClr = RgbColor(chart_bg_color)
-
-                # 차트 전체 배경 설정
-                if hasattr(chart, 'chartSpace') and hasattr(chart.chartSpace, 'spPr'):
-                    chart.chartSpace.spPr.solidFill = solid_fill
-
-                # 플롯 영역 배경도 동일하게 설정
-                if hasattr(chart, 'plotArea') and hasattr(chart.plotArea, 'spPr'):
-                    plot_fill = SolidColorFillProperties()
-                    plot_fill.srgbClr = RgbColor(chart_bg_color)
-                    chart.plotArea.spPr.solidFill = plot_fill
-
-            except Exception as e:
-                logging.warning(f"차트 배경색 설정 실패: {str(e)}")
-
             # 차트 위치 설정 (좌측 배치 - KPI 영역 아래로 이동)
             chart.anchor = "D14"
             chart.width = 14
@@ -3764,6 +3738,8 @@ class InteractivePivotGenerator:
                 
             except Exception as e:
                 logging.warning(f"예산과목 슬라이서 추가 실패: {str(e)}")
+        except Exception as e:
+            logging.error(f"연도별 슬라이서 추가 중 오류: {str(e)}")
 
             # 2. 특성 필드 슬라이서 (예산금액, 지출액, 예산잔액, 집행률)
             try:
@@ -3813,15 +3789,10 @@ class InteractivePivotGenerator:
                     logging.error("연도별 예산 데이터 시트 생성 실패")
                     return False
 
-                # 연도별 비교 피벗 테이블 시트 생성 (기존 방식 유지)
-                yearly_pivot_sheet_name = '연도별예산비교'
-                try:
-                    wb.sheets[yearly_pivot_sheet_name].delete()
-                except:
-                    pass
-                
-                ws_yearly_pivot = wb.sheets.add(yearly_pivot_sheet_name)
-                
+                # 기존에는 별도 시트에 피벗을 만들었으나, 간소화를 위해
+                # 연도별데이터 시트의 E열(E5부터)에 피벗을 생성하도록 변경합니다.
+                dest_cell = 'E5'
+
                 # 대시보드 시트 확인 및 생성
                 try:
                     ws_dashboard = wb.sheets['대시보드']
@@ -3829,18 +3800,27 @@ class InteractivePivotGenerator:
                 except:
                     ws_dashboard = wb.sheets.add('대시보드')
                     logging.info("새 대시보드 시트 생성")
-                
-                # 연도별 피벗 테이블 생성 (연도별예산비교 시트에 생성, 대시보드에는 차트와 슬라이서만)
-                yearly_pivot_table = self._create_yearly_pivot_table(wb, yearly_data_sheet_name, ws_yearly_pivot)
+                # 연도별 피벗 테이블 생성 (연도별예산데이터 시트의 E열에 생성)
+                # ws_pivot로 연도별데이터 시트를 전달하고 dest_cell으로 위치 지정
+                ws_dest_for_pivot = wb.sheets[yearly_data_sheet_name]
+                yearly_pivot_table = self._create_yearly_pivot_table(wb, yearly_data_sheet_name, ws_dest_for_pivot, dest_cell=dest_cell)
                 if yearly_pivot_table:
                     # 대시보드에 제목 추가
                     self._add_yearly_comparison_title_to_dashboard(ws_dashboard)
                     
                     # 연도별 비교 차트를 대시보드 B53에 생성
-                    self._add_yearly_comparison_chart_to_dashboard(wb, ws_dashboard, yearly_pivot_table)
+                    # 차트 소스는 연도별예산데이터의 dest_cell에서 확장된 범위를 사용
+                    self._add_yearly_comparison_chart_to_dashboard(wb, ws_dashboard, yearly_data_sheet_name, dest_cell)
                     
                     # 연도별 슬라이서를 대시보드 차트 아래에 추가
                     self._add_yearly_slicers_to_dashboard(wb, yearly_pivot_table, ws_dashboard)
+
+                    # 예산분석 시트에 있는 피벗 차트와 슬라이서(예산과목, 측정항목)를
+                    # 연도별 차트 아래에 추가하여 대시보드를 통합합니다.
+                    try:
+                        self._add_analysis_pivot_and_slicers_to_dashboard(wb, ws_dashboard)
+                    except Exception as e:
+                        logging.warning(f"예산분석 차트/슬라이서 대시보드 추가 실패: {e}")
 
                 wb.save()
                 logging.info("연도별 예산 비교 테이블 생성 완료 (대시보드 시트에 배치)")
@@ -4030,7 +4010,7 @@ class InteractivePivotGenerator:
             logging.error(f"대시보드 시트 연도별 피벗 테이블 생성 중 오류: {str(e)}")
             return None
 
-    def _create_yearly_pivot_table(self, wb, source_sheet_name: str, ws_pivot) -> object:
+    def _create_yearly_pivot_table(self, wb, source_sheet_name: str, ws_pivot, dest_cell: str = 'B5') -> object:
         '''연도별 예산 비교용 피벗 테이블을 생성합니다.'''
         try:
             import xlwings as xw
@@ -4062,9 +4042,9 @@ class InteractivePivotGenerator:
             )
 
             # 2. 피벗 테이블 생성
-            logging.info("연도별 피벗 테이블 생성 중...")
+            logging.info(f"연도별 피벗 테이블 생성 중... 대상: {ws_pivot.name} {dest_cell}")
             pivot_table = pivot_cache.CreatePivotTable(
-                TableDestination=ws_pivot.range('B5').api,
+                TableDestination=ws_pivot.range(dest_cell).api,
                 TableName='YearlyBudgetComparison'
             )
             logging.info("연도별 피벗 테이블 기본 구조 생성 완료")
@@ -4129,8 +4109,12 @@ class InteractivePivotGenerator:
             logging.error(f"연도별 피벗 테이블 생성 중 오류: {str(e)}")
             return None
 
-    def _add_yearly_comparison_chart_to_dashboard(self, wb, ws_dashboard, pivot_table):
-        '''대시보드 시트에 연도별 예산 비교 차트를 추가합니다.'''
+    def _add_yearly_comparison_chart_to_dashboard(self, wb, ws_dashboard, pivot_table_or_sheet, dest_cell: str = 'E5'):
+        '''대시보드 시트에 연도별 예산 비교 차트를 추가합니다.
+
+        pivot_table_or_sheet: either a pivot_table COM object or a sheet name (str).
+        If a sheet name is provided, dest_cell specifies the top-left cell where the pivot is located.
+        '''
         try:
             import xlwings as xw
 
@@ -4142,8 +4126,23 @@ class InteractivePivotGenerator:
             chart = chart_shape.Chart
 
             # 피벗 테이블 범위를 차트 소스로 설정
-            # 연도별예산비교 시트의 피벗테이블(B5부터)을 소스로 사용
-            source_range = wb.sheets['연도별예산비교'].range('B5').expand()
+            # 기본 코드는 별도 시트의 B5을 사용했으나, 이제 연도별예산데이터의 E열로 이동
+            # Determine source_range from either pivot object or sheet+dest_cell
+            source_range = None
+            try:
+                if isinstance(pivot_table_or_sheet, str):
+                    ws_name = pivot_table_or_sheet
+                    source_range = wb.sheets[ws_name].range(dest_cell).expand()
+                else:
+                    # assume pivot COM object
+                    source_range = pivot_table_or_sheet.TableRange2
+            except Exception:
+                # final fallback to 연도별예산데이터 E5
+                try:
+                    source_range = wb.sheets['연도별예산데이터'].range(dest_cell).expand()
+                except Exception:
+                    logging.error('연도별 예산 비교 차트 소스 범위를 찾을 수 없습니다.')
+                    return
             chart.SetSourceData(Source=source_range.api)
 
             # 차트 제목 설정
@@ -4163,28 +4162,9 @@ class InteractivePivotGenerator:
             anchor_cell = ws_dashboard.range('B53')
             chart_shape.Left = anchor_cell.left
             chart_shape.Top = anchor_cell.top
-            # 차트 크기 지정 (포인트)
-            chart_shape.Width = 800
-            chart_shape.Height = 400
-
-            # 차트 및 플롯 영역 배경색을 어두운 회색으로 설정 (RGB: 64,64,64)
-            try:
-                dark_gray = (64 << 16) + (64 << 8) + 64
-                # 차트 전체 영역
-                try:
-                    chart.ChartArea.Format.Fill.Solid()
-                    chart.ChartArea.Format.Fill.ForeColor.RGB = dark_gray
-                except Exception:
-                    logging.debug("차트 전체 영역 배경 색상 적용 실패")
-
-                # 플롯 영역 (그래프 내부)
-                try:
-                    chart.PlotArea.Format.Fill.Solid()
-                    chart.PlotArea.Format.Fill.ForeColor.RGB = dark_gray
-                except Exception:
-                    logging.debug("플롯 영역 배경 색상 적용 실패")
-            except Exception as color_error:
-                logging.warning(f"차트 배경색 적용 중 오류: {color_error}")
+            # 차트 크기 지정 (포인트) -> 확대: 1000x500
+            chart_shape.Width = 1000
+            chart_shape.Height = 500
 
             logging.info("대시보드 시트에 연도별 예산 비교 차트 추가 완료 (B53 정렬)")
 
@@ -4204,7 +4184,10 @@ class InteractivePivotGenerator:
             chart = chart_shape.Chart
 
             # 피벗 테이블 범위를 차트 소스로 설정 (이 함수는 피벗 시트 전용)
-            source_range = ws_pivot.range('B5').expand()
+            try:
+                source_range = pivot_table.TableRange2
+            except Exception:
+                source_range = ws_pivot.range('B5').expand()
             chart.SetSourceData(Source=source_range.api)
 
             # 차트 제목/축 설정
@@ -4218,11 +4201,11 @@ class InteractivePivotGenerator:
             except Exception as axis_error:
                 logging.warning(f"축 제목 설정 실패: {axis_error}")
 
-            # 기본 위치/크기
+            # 기본 위치/크기 (피벗시트용 차트 크기도 일관되게 확대)
             chart_shape.Left = 500
             chart_shape.Top = 50
-            chart_shape.Width = 500
-            chart_shape.Height = 350
+            chart_shape.Width = 1000
+            chart_shape.Height = 600
 
             logging.info("연도별 예산 비교 차트 추가 완료")
 
@@ -4232,12 +4215,12 @@ class InteractivePivotGenerator:
     def _add_yearly_slicers_to_dashboard(self, wb, pivot_table, ws_dashboard):
         '''대시보드 시트에 연도별 비교용 슬라이서를 추가합니다. (차트 오른쪽)'''
         try:
-            # 차트 기준 좌표/크기 계산 (B53에 차트 좌상단, 800x400 크기)
+            # 차트 기준 좌표/크기 계산 (B53에 차트 좌상단, 1000x600 크기)
             anchor_cell = ws_dashboard.range('B53')
             chart_left = anchor_cell.left
             chart_top = anchor_cell.top
-            chart_width = 800
-            chart_height = 400
+            chart_width = 1000
+            chart_height = 600
             chart_right = chart_left + chart_width
             chart_bottom = chart_top + chart_height
             margin = 2
@@ -4276,11 +4259,11 @@ class InteractivePivotGenerator:
                 budget_top = year_top + year_height + margin
                 budget_width = year_width
                 # 피벗차트의 하단까지 차지하도록 높이 계산 (최소 높이 보장)
-                budget_height = max(60, int(chart_bottom - budget_top))
+                budget_height = max(60, int(chart_bottom - budget_top)) - 100
                 slicer_cache_budget.Slicers.Add(
                     SlicerDestination=ws_dashboard.api,
                     Name='DashboardBudgetItemSlicer',
-                    Caption='예산과목 선택',
+                    Caption='예산과목_연도별',
                     Top=budget_top,
                     Left=budget_left,
                     Width=budget_width,
@@ -4308,38 +4291,182 @@ class InteractivePivotGenerator:
                 slicer_cache_budget.Slicers.Add(
                     SlicerDestination=ws_pivot.api,
                     Name='YearlyBudgetItemSlicer',
-                    Caption='예산과목 선택',
+                    Caption='예산과목_연도별',
                     Top=50,
                     Left=1050,
                     Width=200,
-                    Height=400
+                    Height=350
                 )
                 logging.info("예산과목 슬라이서 추가 완료")
             except Exception as e:
                 logging.warning(f"예산과목 슬라이서 추가 실패: {str(e)}")
-
-            # 연도 슬라이서 추가
-            try:
-                slicer_cache_year = wb.api.SlicerCaches.Add2(
-                    pivot_table,
-                    '연도'
-                )
-                
-                slicer_cache_year.Slicers.Add(
-                    SlicerDestination=ws_pivot.api,
-                    Name='YearSlicer',
-                    Caption='연도 선택',
-                    Top=470,
-                    Left=1050,
-                    Width=200,
-                    Height=150
-                )
-                logging.info("연도 슬라이서 추가 완료")
-            except Exception as e:
-                logging.warning(f"연도 슬라이서 추가 실패: {str(e)}")
-
         except Exception as e:
             logging.error(f"연도별 슬라이서 추가 중 오류: {str(e)}")
+
+    def _add_analysis_pivot_and_slicers_to_dashboard(self, wb, ws_dashboard):
+        """`예산분석` 시트에 만든 피벗(또는 피벗 소스)을 이용해
+        차트와 슬라이서(예산과목, 특성)를 대시보드에 추가합니다.
+
+        배치: 기존 연도별 차트(B53)의 아래쪽에 붙여 넣습니다.
+        """
+        try:
+            import xlwings as xw
+            from config import PIVOT_SHEET_NAME
+
+            # 피벗이 위치한 시트(예산분석)
+            try:
+                ws_analysis = wb.sheets[PIVOT_SHEET_NAME]
+            except Exception:
+                logging.warning(f"시트 '{PIVOT_SHEET_NAME}'을 찾을 수 없습니다. 예산분석 차트/슬라이서 추가를 건너뜁니다.")
+                return
+
+            # 피벗 테이블 범위를 찾는 시도: 일반적으로 A3에 표/피벗이 위치하므로 확장
+            try:
+                source_range = ws_analysis.range('A3').expand()
+            except Exception:
+                logging.warning('예산분석 피벗 범위를 찾을 수 없습니다.')
+                return
+
+            # 연도별 차트(B53)를 기준으로 아래쪽 위치 계산
+            anchor_cell = ws_dashboard.range('B53')
+            chart_left = anchor_cell.left
+            chart_top = anchor_cell.top
+            chart_height = 400
+            margin = 10
+
+            # 새 차트 생성: 대시보드의 B84 셀 위쪽 좌표에 배치
+            new_chart_top = ws_dashboard.range('B82').top
+            
+            chart_shape = ws_dashboard.api.Shapes.AddChart2(
+                227,
+                xw.constants.ChartType.xlColumnClustered
+            )
+            chart = chart_shape.Chart
+            chart.SetSourceData(Source=source_range.api)
+            chart.HasTitle = True
+            chart.ChartTitle.Text = '예산분석: 예산과목별 지표'
+
+            # 위치/크기 설정
+            chart_shape.Left = chart_left
+            chart_shape.Top = new_chart_top
+            # Match size with the yearly comparison chart (1000x600)
+            chart_shape.Width = 1000
+            chart_shape.Height = 500
+
+            # 슬라이서 배치: 차트 오른쪽에 측정항목/예산과목 슬라이서 배치 (순서 변경)
+            chart_right = chart_left + 1000  # 차트 너비 1000
+            slicer_left = chart_right + 2  # 차트 오른쪽 여백 2포인트
+
+            try:
+                # 1. 측정항목 슬라이서 먼저 배치 (차트 오른쪽 상단, 연도 선택과 같은 높이)
+                try:
+                    slicer_cache_metric = wb.api.SlicerCaches.Add2(
+                        ws_analysis.api.PivotTables(1),
+                        '특성'
+                    )
+                except Exception as add_err:
+                    logging.info(f"측정항목 슬라이서 캐시 추가 실패(이미 존재할 수 있음): {add_err}")
+                    slicer_cache_metric = None
+                    # 기존 캐시 검색
+                    try:
+                        sc_count = int(wb.api.SlicerCaches.Count)
+                        for idx in range(1, sc_count + 1):
+                            sc = wb.api.SlicerCaches.Item(idx)
+                            try:
+                                if getattr(sc, 'SourceName', None) == '특성':
+                                    slicer_cache_metric = sc
+                                    break
+                            except Exception:
+                                try:
+                                    if sc.Slicers.Count > 0 and getattr(sc.Slicers.Item(1), 'Caption', '') == '특성':
+                                        slicer_cache_metric = sc
+                                        break
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                if slicer_cache_metric is not None:
+                    try:
+                        metric_top = new_chart_top  # 차트와 같은 높이에서 시작
+                        metric_height = 150  # 측정항목 슬라이서 높이
+                        slicer_cache_metric.Slicers.Add(
+                            SlicerDestination=ws_dashboard.api,
+                            Name='AnalysisMetricSlicer',
+                            Caption='측정항목',
+                            Top=metric_top,
+                            Left=slicer_left,
+                            Width=120,
+                            Height=metric_height
+                        )
+                        logging.info("대시보드에 측정항목 슬라이서 추가 완료 (차트 상단)")
+                    except Exception as e:
+                        logging.warning(f"대시보드에 예산분석 측정항목 슬라이서 추가 실패(이미 존재할 수 있음): {e}")
+                else:
+                    logging.warning("예산분석 측정항목 슬라이서 캐시를 찾을 수 없어 추가를 건너뜁니다.")
+
+            except Exception as e:
+                logging.warning(f"대시보드에 예산분석 측정항목 슬라이서 처리 중 오류: {e}")
+
+            try:
+                # 2. 예산과목 슬라이서 (측정항목 바로 아래, 차트 하단까지)
+                try:
+                    slicer_cache_budget = wb.api.SlicerCaches.Add2(
+                        ws_analysis.api.PivotTables(1),
+                        '예산과목'
+                    )
+                except Exception as add_err:
+                    logging.info(f"예산과목 슬라이서 캐시 추가 실패(이미 존재할 수 있음): {add_err}")
+                    slicer_cache_budget = None
+                    # 기존 캐시 검색
+                    try:
+                        sc_count = int(wb.api.SlicerCaches.Count)
+                        for idx in range(1, sc_count + 1):
+                            sc = wb.api.SlicerCaches.Item(idx)
+                            try:
+                                if getattr(sc, 'SourceName', None) == '예산과목':
+                                    slicer_cache_budget = sc
+                                    break
+                            except Exception:
+                                try:
+                                    if sc.Slicers.Count > 0 and getattr(sc.Slicers.Item(1), 'Caption', '') == '예산과목':
+                                        slicer_cache_budget = sc
+                                        break
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                if slicer_cache_budget is not None:
+                    try:
+                        metric_top = new_chart_top
+                        metric_height = 150
+                        budget_top = metric_top + metric_height  # 측정항목 슬라이서 바로 아래
+                        chart_bottom = new_chart_top + 500  # 차트 높이 500
+                        budget_height = chart_bottom - budget_top  # 차트 하단까지
+                        
+                        slicer_cache_budget.Slicers.Add(
+                            SlicerDestination=ws_dashboard.api,
+                            Name='AnalysisBudgetItemSlicer',
+                            Caption='예산과목',
+                            Top=budget_top,
+                            Left=slicer_left,
+                            Width=120,
+                            Height=budget_height
+                        )
+                        logging.info("대시보드에 예산과목 슬라이서 추가 완료 (측정항목 아래)")
+                    except Exception as e:
+                        logging.warning(f"대시보드에 예산분석 예산과목 슬라이서 추가 실패(이미 존재할 수 있음): {e}")
+                else:
+                    logging.warning("예산분석 예산과목 슬라이서 캐시를 찾을 수 없어 추가를 건너뜁니다.")
+
+            except Exception as e:
+                logging.warning(f"대시보드에 예산분석 예산과목 슬라이서 처리 중 오류: {e}")
+
+            logging.info('대시보드에 예산분석 차트와 슬라이서 추가 완료 (측정항목→예산과목 순서)')
+
+        except Exception as e:
+            logging.error(f"예산분석 차트/슬라이서 추가 중 오류: {e}")
 
     def reorder_all_sheets(self, file_path: str) -> bool:
         '''모든 시트를 원하는 순서로 재배치합니다.'''
