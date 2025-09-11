@@ -3058,11 +3058,16 @@ class DashboardGenerator:
             black_fill = PatternFill(start_color=self.color_palette['primary_black'],
                                    end_color=self.color_palette['primary_black'], fill_type='solid')
 
-            # 빈 셀들에 검정색 배경 적용 (V열까지 확장)
-            for row in range(1, 50):
+            # 빈 셀들에 검정색 배경 적용 (V열까지 확장) — 확장 행 수 300까지
+            for row in range(1, 301):
                 for col in range(1, 23):  # V열은 22번째 열이므로 23까지
                     cell = worksheet.cell(row=row, column=col)
-                    if cell.fill.start_color.index == '00000000':  # 기본 배경인 경우
+                    # openpyxl 색상 인덱스가 다를 수 있으므로 빈 셀이거나 투명 배경인 경우 덮어쓰기
+                    try:
+                        is_default_fill = getattr(cell.fill, 'fill_type', None) is None or cell.fill.start_color.index in ('00000000', '000000')
+                    except Exception:
+                        is_default_fill = True
+                    if is_default_fill:
                         cell.fill = black_fill
 
             logging.info("현대적 대시보드 스타일링 적용 완료")
@@ -4161,6 +4166,25 @@ class InteractivePivotGenerator:
             # 차트 크기 지정 (포인트)
             chart_shape.Width = 800
             chart_shape.Height = 400
+
+            # 차트 및 플롯 영역 배경색을 어두운 회색으로 설정 (RGB: 64,64,64)
+            try:
+                dark_gray = (64 << 16) + (64 << 8) + 64
+                # 차트 전체 영역
+                try:
+                    chart.ChartArea.Format.Fill.Solid()
+                    chart.ChartArea.Format.Fill.ForeColor.RGB = dark_gray
+                except Exception:
+                    logging.debug("차트 전체 영역 배경 색상 적용 실패")
+
+                # 플롯 영역 (그래프 내부)
+                try:
+                    chart.PlotArea.Format.Fill.Solid()
+                    chart.PlotArea.Format.Fill.ForeColor.RGB = dark_gray
+                except Exception:
+                    logging.debug("플롯 영역 배경 색상 적용 실패")
+            except Exception as color_error:
+                logging.warning(f"차트 배경색 적용 중 오류: {color_error}")
 
             logging.info("대시보드 시트에 연도별 예산 비교 차트 추가 완료 (B53 정렬)")
 
