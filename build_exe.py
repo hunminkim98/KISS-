@@ -34,24 +34,37 @@ def build_executable():
     """PyInstaller로 실행 파일 생성"""
     print("🚀 실행 파일 생성 시작...")
     
-    # PyInstaller 명령어 구성
+    # PyInstaller 실행 파일 경로 찾기
+    import site
+    user_base = site.USER_BASE
+    pyinstaller_exe = os.path.join(user_base, 'Python311', 'Scripts', 'pyinstaller.exe')
+    # PyInstaller를 현재 python 실행환경에서 호출하도록 변경 (python -m PyInstaller)
+    # 이렇게 하면 활성화된 가상환경/패키지 설치 경로를 일관되게 사용합니다.
     cmd = [
-        'pyinstaller',
+        sys.executable, '-m', 'PyInstaller',
         '--onefile',                    # 단일 실행 파일 생성
-        '--windowed',                   # GUI 프로그램 (콘솔 창 숨김)
+        '--windowed',                   # GUI 프로그래밍 (콘솔 창 숨김)
         '--name=연구비처리도우미',        # 실행 파일 이름
         '--add-data=config.py:.',       # config.py 포함
         '--add-data=research_core.py:.', # research_core.py 포함
         '--add-data=research_gui.py:.',  # research_gui.py 포함
-        '--hidden-import=pandas',       # pandas 명시적 포함
-        '--hidden-import=openpyxl',     # openpyxl 명시적 포함
-        '--hidden-import=tkinter',      # tkinter 명시적 포함
-        '--hidden-import=numpy',        # numpy 명시적 포함
-        '--hidden-import=colorlog',     # colorlog 명시적 포함
-        '--hidden-import=psutil',       # psutil 명시적 포함
-        '--hidden-import=pillow',       # pillow 명시적 포함
-        '--hidden-import=xlsxwriter',   # xlsxwriter 명시적 포함
-        'main.py'                       # 메인 스크립트
+        # 일반적으로 필요한 hidden-imports
+        '--hidden-import=pandas',
+        '--hidden-import=openpyxl',
+        '--hidden-import=tkinter',
+        '--hidden-import=numpy',
+        '--hidden-import=colorlog',
+        '--hidden-import=psutil',
+        '--hidden-import=pillow',
+        '--hidden-import=xlsxwriter',
+        # Excel 상호작용을 위해 xlwings 및 pywin32 관련 모듈을 명시적으로 포함
+        '--hidden-import=xlwings',
+        '--hidden-import=xlwings.server',
+        '--hidden-import=xlwings._xlwindows',
+        '--hidden-import=win32com',
+        '--hidden-import=pythoncom',
+        '--hidden-import=pywintypes',
+        'main.py'
     ]
     
     print(f"📋 실행 명령어: {' '.join(cmd)}")
@@ -72,11 +85,16 @@ def create_portable_version():
     """포터블 버전 생성 (폴더 형태)"""
     print("📦 포터블 버전 생성 시작...")
     
+    # PyInstaller 실행 파일 경로 찾기
+    import site
+    user_base = site.USER_BASE
+    pyinstaller_exe = os.path.join(user_base, 'Python311', 'Scripts', 'pyinstaller.exe')
+    # 현재 python 환경에서 PyInstaller를 호출하도록 변경
     cmd = [
-        'pyinstaller',
+        sys.executable, '-m', 'PyInstaller',
         '--onedir',                     # 폴더 형태로 생성
-        '--windowed',                   # GUI 프로그램
-        '--name=연구비처리도우미_포터블',  # 폴더 이름
+        '--windowed',                   # GUI 프로그래밍
+        '--name=연구비처리도우미_포터블',  # 포터블 이름
         '--add-data=config.py:.',
         '--add-data=research_core.py:.',
         '--add-data=research_gui.py:.',
@@ -89,6 +107,12 @@ def create_portable_version():
         '--hidden-import=psutil',
         '--hidden-import=pillow',
         '--hidden-import=xlsxwriter',
+        '--hidden-import=xlwings',
+        '--hidden-import=xlwings.server',
+        '--hidden-import=xlwings._xlwindows',
+        '--hidden-import=win32com',
+        '--hidden-import=pythoncom',
+        '--hidden-import=pywintypes',
         'main.py'
     ]
     
